@@ -1,0 +1,3 @@
+"""
+Institutional Activity Module package.
+"""
