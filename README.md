@@ -23,17 +23,20 @@ A dedicated, enterprise-grade institutional intelligence suite tracking Indian e
 - **🧠 7. Institutional Consensus**: Multi-institutional consensus matrix combining MF, FII, and DII trends with sector-level flow tables and an interactive sector heatmap.
 - **📜 8. Historical Data & Sync**: Pipeline synchronization manager with "🔄 Update Institutional Data" trigger, data freshness badges, audit logs, and direct database exports.
 
-### 2. 🔬 1-2 Day Swing Strategy Backtest Engine (NEW)
+### 2. 🔬 Swing Strategy Backtest Engine (1–10 Days) (NEW)
 Simulate and backtest technical screener signals across historical trading sessions with realistic execution rules:
 - **Execution Rule**: Simulates entering a buy trade at the **Market Open of Day $T+1$** following the screener signal.
-- **Holding Horizon**: Hold for **1 or 2 days** to evaluate short-term momentum.
+- **Adjustable Holding Horizon**: Configurable holding period from **1 day to 10 days**.
 - **Customizable Targets**:
   - **Target 1**: Configurable default of 3.5% (user target 3–4%).
   - **Target 2**: Extended adjustable target (default 6.0%) for runners.
-  - **Stop Loss**: Configurable risk boundary (default 2.0%).
+  - **Initial Stop Loss**: Configurable risk boundary (default 2.0%).
+- **🛡️ Dynamic Trailing Stop Loss**:
+  - **Breakeven & Trail after Target 1**: Automatically eliminates downside risk upon touching Target 1 by moving Stop Loss to Entry price (breakeven), then ratchets up to protect peak high gains.
+  - **Immediate Trailing**: Continually trails $X\%$ below highest high reached from day 1.
 - **Interactive Visualizations**:
-  - Donut chart breakdown of trade outcomes (Target 1 Hit, Target 2 Hit, Stop Loss Hit, Exited at Close).
-  - Daily distribution bar charts illustrating target and stop loss frequencies per session.
+  - Donut chart breakdown of trade outcomes (Target 1 Hit, Target 2 Hit, Trailing SL Hit, Stop Loss Hit, Exited at Close).
+  - Daily distribution bar charts illustrating target, trailing SL, and stop loss frequencies per session.
   - Date-by-date win rate and return analysis over the last 7 to 30+ trading days.
   - Full stock-by-stock trade log with direct TradingView charting links and CSV export.
 

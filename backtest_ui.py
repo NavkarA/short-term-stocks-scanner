@@ -1,7 +1,7 @@
 """
-1-2 Day Swing Strategy Backtest Dashboard Module.
-Simulates buying on Day T+1 Open and holding for 1 to 2 days
-with customizable Target 1, Target 2, and Stop Loss parameters.
+1-10 Day Swing Strategy Backtest Dashboard Module.
+Simulates buying on Day T+1 Open and holding for 1 to 10 days
+with customizable Target 1, Target 2, Stop Loss, and Trailing Stop Loss parameters.
 """
 
 import time
@@ -24,16 +24,16 @@ from scraper import (
 
 def render_backtest_dashboard():
     """
-    Renders the complete 1-2 Day Swing Backtest Dashboard in Streamlit.
+    Renders the complete 1-10 Day Swing Backtest Dashboard in Streamlit.
     """
     st.markdown("""
         <div>
             <h1 style='font-size: 2.2rem; font-weight: 800; margin-bottom: 0.2rem;'>
-                🔬 1-2 Day Swing Strategy Backtester
+                🔬 Swing Strategy Backtest Engine (1–10 Days)
             </h1>
             <p style='font-size: 1.05rem; color: #8b949e; margin-bottom: 1.5rem;'>
-                Simulate next-day Open entry (Day T+1) on Chartink screener signals, held for 1 or 2 days
-                to capture quick momentum breakouts with multi-target and stop loss tracking.
+                Simulate next-day Open entry (Day T+1) on Chartink screener signals, held for 1 to 10 days
+                with customizable profit targets (T1 & T2), risk limits, and dynamic Trailing Stop Loss.
             </p>
         </div>
     """, unsafe_allow_html=True)
@@ -48,7 +48,7 @@ def render_backtest_dashboard():
     # STRATEGY & PARAMETER CONTROLS
     # ==========================================
     with st.expander("⚙️ Strategy Parameters & Scanner Configuration", expanded=st.session_state.bt_results is None):
-        c1, c2 = st.columns([1.2, 1])
+        c1, c2 = st.columns([1.1, 1.2])
 
         with c1:
             st.markdown("#### 🎯 Scanner Selection")
@@ -83,7 +83,7 @@ def render_backtest_dashboard():
                 url_to_backtest = PRESET_SCANNERS[chosen_scanner].get("url", CHARTINK_BASE_URL)
                 st.caption(f"ℹ️ {PRESET_SCANNERS[chosen_scanner]['description']}")
 
-            st.markdown("#### 📅 Backtest Horizon")
+            st.markdown("#### 📅 Backtest Scope & Holding Period")
             lookback_days = st.slider(
                 "Historical Trading Days to Evaluate",
                 min_value=5,
@@ -92,6 +92,16 @@ def render_backtest_dashboard():
                 step=1,
                 help="Number of past trading sessions to evaluate (Default: at least 7 days).",
                 key="bt_lookback_days"
+            )
+
+            max_holding_days = st.slider(
+                "Holding Horizon (Trading Days)",
+                min_value=1,
+                max_value=10,
+                value=3,
+                step=1,
+                help="Maximum holding period in trading days (from 1 day up to 10 days).",
+                key="bt_holding_days"
             )
 
         with c2:
@@ -117,7 +127,7 @@ def render_backtest_dashboard():
             )
 
             sl_pct = st.slider(
-                "Stop Loss (%)",
+                "Initial Stop Loss (%)",
                 min_value=0.5,
                 max_value=10.0,
                 value=2.0,
@@ -126,14 +136,41 @@ def render_backtest_dashboard():
                 key="bt_sl"
             )
 
-            max_holding_days = st.radio(
-                "Maximum Holding Period",
-                options=[1, 2],
-                index=1,
-                format_func=lambda x: f"{x} Day{'s' if x > 1 else ''} (Exit at Day {x} Close if no Target/SL hit)",
-                horizontal=True,
-                key="bt_holding_days"
+            # Trailing Stop Loss Controls
+            st.markdown("#### 🛡️ Trailing Stop Loss Options")
+            enable_trailing_sl = st.checkbox(
+                "Enable Trailing Stop Loss",
+                value=False,
+                help="Automatically ratchet the stop loss upwards to protect profit.",
+                key="bt_enable_trailing"
             )
+
+            if enable_trailing_sl:
+                tsl_c1, tsl_c2 = st.columns(2)
+                with tsl_c1:
+                    trailing_sl_pct = st.slider(
+                        "Trailing Offset (%)",
+                        min_value=0.5,
+                        max_value=5.0,
+                        value=2.0,
+                        step=0.5,
+                        help="Distance below peak high to trail the stop loss.",
+                        key="bt_trailing_sl_pct"
+                    )
+                with tsl_c2:
+                    trail_mechanism = st.selectbox(
+                        "Trailing Trigger Mechanism",
+                        [
+                            "Move to Breakeven & Trail after Target 1",
+                            "Trail from Entry immediately"
+                        ],
+                        index=0,
+                        help="Breakeven mode eliminates downside risk once Target 1 is touched, then lets runners trail higher.",
+                        key="bt_trail_mechanism"
+                    )
+            else:
+                trailing_sl_pct = 2.0
+                trail_mechanism = "Move to Breakeven & Trail after Target 1"
 
         st.markdown("---")
         btn_col1, btn_col2 = st.columns([1, 3])
@@ -146,8 +183,9 @@ def render_backtest_dashboard():
             )
         with btn_col2:
             st.caption(
-                "Rule: Buy at Open of Day $T+1$ following the screener signal. "
-                "Evaluates Intraday High/Low for Day 1 and Day 2 to record Target 1, Target 2, or Stop Loss hits."
+                f"Rule: Buy at Open of Day $T+1$. Holds for up to **{max_holding_days} day(s)**. "
+                f"Targets: +{target_1_pct}% / +{target_2_pct}%. Stop Loss: -{sl_pct}%"
+                f"{f' with {trailing_sl_pct}% Trailing SL' if enable_trailing_sl else ''}."
             )
 
     # ==========================================
@@ -166,7 +204,7 @@ def render_backtest_dashboard():
             status_text.markdown(f"⏳ **{msg}**")
 
         try:
-            update_progress(0.1, f"Fetching historical screener signals from Chartink backtest API...")
+            update_progress(0.1, "Fetching historical screener signals from Chartink backtest API...")
             signals_by_date, err = chartink_historical_signals(
                 clause_to_backtest,
                 url=url_to_backtest,
@@ -179,7 +217,9 @@ def render_backtest_dashboard():
                 st.error(f"Failed to fetch historical signals from Chartink: {err or 'No signals found'}")
                 return
 
-            update_progress(0.3, f"Retrieved {len(signals_by_date)} trading dates from Chartink. Downloading market data...")
+            update_progress(0.3, f"Retrieved {len(signals_by_date)} trading dates. Downloading market data...")
+
+            trail_trigger_val = "After Target 1" if "Breakeven" in trail_mechanism else "From Entry"
 
             trades_df, summary_metrics, date_summary_df = run_swing_backtest(
                 signals_by_date=signals_by_date,
@@ -188,6 +228,9 @@ def render_backtest_dashboard():
                 sl_pct=sl_pct,
                 max_holding_days=max_holding_days,
                 num_days=lookback_days,
+                enable_trailing_sl=enable_trailing_sl,
+                trailing_sl_pct=trailing_sl_pct,
+                trail_trigger=trail_trigger_val,
                 progress_callback=update_progress
             )
 
@@ -206,6 +249,9 @@ def render_backtest_dashboard():
                 "sl_pct": sl_pct,
                 "max_holding_days": max_holding_days,
                 "lookback_days": lookback_days,
+                "enable_trailing_sl": enable_trailing_sl,
+                "trailing_sl_pct": trailing_sl_pct,
+                "trail_mechanism": trail_mechanism,
                 "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             st.rerun()
@@ -222,7 +268,7 @@ def render_backtest_dashboard():
     bt = st.session_state.bt_results
 
     if not bt or bt.get("trades_df") is None or bt["trades_df"].empty:
-        st.info("👋 Click **'🚀 Run Historical Backtest'** above to simulate the 1-2 day swing strategy over the last 7+ trading sessions.")
+        st.info("👋 Click **'🚀 Run Historical Backtest'** above to simulate your swing strategy across historical trading sessions.")
         return
 
     trades_df: pd.DataFrame = bt["trades_df"]
@@ -233,11 +279,12 @@ def render_backtest_dashboard():
     header_col1, header_col2 = st.columns([3, 1])
     with header_col1:
         st.subheader(f"📊 Backtest Results: {bt['scanner_name']}")
+        tsl_label = f"🛡️ Trailing SL: {bt['trailing_sl_pct']}% ({bt['trail_mechanism']})" if bt.get("enable_trailing_sl") else "Fixed SL (No Trailing)"
         st.caption(
             f"Evaluated Last **{bt['lookback_days']} Trading Days** | "
             f"Target 1: **+{bt['target_1_pct']}%** | Target 2: **+{bt['target_2_pct']}%** | "
-            f"Stop Loss: **-{bt['sl_pct']}%** | Holding: **{bt['max_holding_days']} Day(s)** | "
-            f"Run at: `{bt['run_time']}`"
+            f"Stop Loss: **-{bt['sl_pct']}%** | Holding Horizon: **Up to {bt['max_holding_days']} Day(s)** | "
+            f"{tsl_label} | Run at: `{bt['run_time']}`"
         )
     with header_col2:
         csv_bytes = trades_df.to_csv(index=False).encode("utf-8")
@@ -283,13 +330,22 @@ def render_backtest_dashboard():
             f"{summary.get('t2_hit_count', 0)} Hit"
         )
     with m5:
-        sl_rate = summary.get("sl_hit_rate_pct", 0.0)
-        st.metric(
-            f"Stop Loss (-{bt['sl_pct']}%)",
-            f"{sl_rate:.1f}%",
-            f"{summary.get('sl_hit_count', 0)} Hit",
-            delta_color="inverse"
-        )
+        if bt.get("enable_trailing_sl"):
+            trail_rate = summary.get("trail_sl_hit_rate_pct", 0.0)
+            sl_rate = summary.get("sl_hit_rate_pct", 0.0)
+            st.metric(
+                f"Trailing / Fixed SL",
+                f"{trail_rate:.1f}% / {sl_rate:.1f}%",
+                f"{summary.get('trail_sl_hit_count', 0)} Trail / {summary.get('sl_hit_count', 0)} SL"
+            )
+        else:
+            sl_rate = summary.get("sl_hit_rate_pct", 0.0)
+            st.metric(
+                f"Stop Loss (-{bt['sl_pct']}%)",
+                f"{sl_rate:.1f}%",
+                f"{summary.get('sl_hit_count', 0)} Hit",
+                delta_color="inverse"
+            )
     with m6:
         avg_ret = summary.get("avg_return_pct", 0.0)
         pf = summary.get("profit_factor", 1.0)
@@ -311,18 +367,21 @@ def render_backtest_dashboard():
         outcome_counts = trades_df["Outcome"].value_counts().reset_index()
         outcome_counts.columns = ["Outcome", "Count"]
 
-        # Color palette for outcomes
-        color_map = {
-            "🚀 Target 2 Hit (Day 1)": "#00C853",
-            "🚀 Target 2 Hit (Day 2)": "#2E7D32",
-            "🎯 Target 1 Hit (Day 1)": "#69F0AE",
-            "🎯 Target 1 Hit (Day 2)": "#00B0FF",
-            "🛑 Stop Loss Hit (Day 1)": "#D50000",
-            "🛑 Stop Loss Hit (Day 2)": "#FF5252",
-            "⏱️ Exited at Day 1 Close": "#FFD600",
-            "⏱️ Exited at Day 2 Close": "#FF9100",
-            "⏳ Pending Entry": "#9E9E9E"
-        }
+        # Color mapping helper
+        def get_outcome_color(label: str) -> str:
+            if "Target 2" in label:
+                return "#00C853"  # Vibrant Green
+            elif "Target 1" in label:
+                return "#00B0FF"  # Bright Blue
+            elif "Trailing SL" in label:
+                return "#FFAB00"  # Amber
+            elif "Stop Loss" in label:
+                return "#FF5252"  # Coral Red
+            elif "Exited" in label:
+                return "#AB47BC"  # Purple
+            return "#9E9E9E"
+
+        color_map = {name: get_outcome_color(name) for name in outcome_counts["Outcome"]}
 
         fig_donut = px.pie(
             outcome_counts,
@@ -359,6 +418,13 @@ def render_backtest_dashboard():
                 name=f"Target 1 (+{bt['target_1_pct']}%)",
                 marker_color="#00B0FF"
             ))
+            if "Trailing SL Hits" in date_summary_df.columns and date_summary_df["Trailing SL Hits"].sum() > 0:
+                fig_bar.add_trace(go.Bar(
+                    x=date_summary_df["Signal Date"],
+                    y=date_summary_df["Trailing SL Hits"],
+                    name="Trailing SL Hits 🛡️",
+                    marker_color="#FFAB00"
+                ))
             fig_bar.add_trace(go.Bar(
                 x=date_summary_df["Signal Date"],
                 y=date_summary_df["Stop Loss Hits"],
@@ -386,25 +452,29 @@ def render_backtest_dashboard():
     # ----------------------------------------------------
     st.markdown("##### 🗓️ Daily Breakdown & Win Rates")
     if not date_summary_df.empty:
+        col_cfg = {
+            "Signal Date": st.column_config.TextColumn("Signal Date", width="medium"),
+            "Signals Count": st.column_config.NumberColumn("Stocks Count", format="%d"),
+            "Target 1 Hits": st.column_config.NumberColumn("Target 1 Hits 🎯", format="%d"),
+            "Target 2 Hits": st.column_config.NumberColumn("Target 2 Hits 🚀", format="%d"),
+            "Stop Loss Hits": st.column_config.NumberColumn("Stop Loss Hits 🛑", format="%d"),
+            "Win Rate %": st.column_config.ProgressColumn(
+                "Win Rate %",
+                format="%.1f%%",
+                min_value=0,
+                max_value=100
+            ),
+            "Average Return %": st.column_config.NumberColumn(
+                "Avg Return %",
+                format="%+.2f%%"
+            ),
+        }
+        if "Trailing SL Hits" in date_summary_df.columns:
+            col_cfg["Trailing SL Hits"] = st.column_config.NumberColumn("Trailing SL Hits 🛡️", format="%d")
+
         st.dataframe(
             date_summary_df,
-            column_config={
-                "Signal Date": st.column_config.TextColumn("Signal Date", width="medium"),
-                "Signals Count": st.column_config.NumberColumn("Stocks Count", format="%d"),
-                "Target 1 Hits": st.column_config.NumberColumn("Target 1 Hits 🎯", format="%d"),
-                "Target 2 Hits": st.column_config.NumberColumn("Target 2 Hits 🚀", format="%d"),
-                "Stop Loss Hits": st.column_config.NumberColumn("Stop Loss Hits 🛑", format="%d"),
-                "Win Rate %": st.column_config.ProgressColumn(
-                    "Win Rate %",
-                    format="%.1f%%",
-                    min_value=0,
-                    max_value=100
-                ),
-                "Average Return %": st.column_config.NumberColumn(
-                    "Avg Return %",
-                    format="%+.2f%%"
-                ),
-            },
+            column_config=col_cfg,
             use_container_width=True,
             hide_index=True
         )
@@ -451,11 +521,11 @@ def render_backtest_dashboard():
         "Entry Price",
         "Target 1 Price",
         "Target 2 Price",
-        "Stop Loss Price",
-        "Day 1 High",
-        "Day 1 Max Gain %",
-        "Day 2 High",
-        "Day 2 Max Gain %",
+        "Initial SL Price",
+        "Final SL Price",
+        "Peak High",
+        "Peak Gain %",
+        "Exit Price",
         "Holding Days",
         "Outcome",
         "Realized Return %",
@@ -470,11 +540,11 @@ def render_backtest_dashboard():
             "Entry Price": st.column_config.NumberColumn("Entry (₹)", format="₹%.2f"),
             "Target 1 Price": st.column_config.NumberColumn("T1 Price (₹)", format="₹%.2f"),
             "Target 2 Price": st.column_config.NumberColumn("T2 Price (₹)", format="₹%.2f"),
-            "Stop Loss Price": st.column_config.NumberColumn("SL Price (₹)", format="₹%.2f"),
-            "Day 1 High": st.column_config.NumberColumn("D1 High (₹)", format="₹%.2f"),
-            "Day 1 Max Gain %": st.column_config.NumberColumn("D1 Max Gain %", format="%+.2f%%"),
-            "Day 2 High": st.column_config.NumberColumn("D2 High (₹)", format="₹%.2f"),
-            "Day 2 Max Gain %": st.column_config.NumberColumn("D2 Max Gain %", format="%+.2f%%"),
+            "Initial SL Price": st.column_config.NumberColumn("Initial SL (₹)", format="₹%.2f"),
+            "Final SL Price": st.column_config.NumberColumn("Final SL (₹)", format="₹%.2f"),
+            "Peak High": st.column_config.NumberColumn("Peak High (₹)", format="₹%.2f"),
+            "Peak Gain %": st.column_config.NumberColumn("Peak Gain %", format="%+.2f%%"),
+            "Exit Price": st.column_config.NumberColumn("Exit Price (₹)", format="₹%.2f"),
             "Realized Return %": st.column_config.NumberColumn("Realized Return %", format="%+.2f%%"),
             "Holding Days": st.column_config.NumberColumn("Hold (Days)", format="%d"),
         },
