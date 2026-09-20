@@ -30,6 +30,16 @@ PRESET_SCANNERS: Dict[str, Dict[str, str]] = {
         ),
         "url": "https://chartink.com/screener/short-term-breakouts"
     },
+    "New Short Term Screener": {
+        "description": "Short term breakout with >9% surge on signal day and Market Cap < ₹3,000 Cr (Micro/Small-Cap Momentum)",
+        "clause": (
+            "( {cash} ( daily max( 5 , daily close ) > 6 days ago max( 120 , daily close ) * 1.05 "
+            "and daily volume > daily sma( volume,5 ) "
+            "and daily close > 1 day ago close * 1.09 "
+            "and market cap < 3000 ) )"
+        ),
+        "url": "https://chartink.com/screener/short-term-breakouts"
+    },
     "Consolidated Breakout (SMA Convergence)": {
         "description": "Stocks trading within +-3% of 5, 20, 50, 100, and 200 SMAs (Tight Bollinger/MA compression)",
         "clause": (

@@ -47,6 +47,7 @@ Simulate and backtest technical screener signals across historical trading sessi
 ### 3. ⚡ Live Technical Screener Presets & Fundamental Enrichment
 - **Curated Breakout Presets**:
   - **Short Term Breakouts** (`chartink.com/screener/short-term-breakouts`)
+  - **New Short Term Screener** (Short Term Breakout + Previous Day Return > 9% + Market Cap < ₹3,000 Cr)
   - **Consolidated Breakout (52-Week High)**
   - **About to Break (Multi-Year Breakout)**
   - **Volatility Compression (NR4/NR7 Contraction)**
