@@ -355,12 +355,14 @@ def run_swing_backtest(
     enable_trailing_sl: bool = False,
     trailing_sl_pct: float = 2.0,
     trail_trigger: str = "After Target 1",
+    t1_book_pct: float = 50.0,
     progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
     """
     Backtests a swing strategy using historical scanner signals.
     Buys at Day T+1 Open, evaluates Target 1, Target 2, Stop Loss, Trailing Stop Loss,
-    or Close Exit across 1 to 10 holding days.
+    or Close Exit across 1 to 10 holding days. Supports partial quantity booking on Target 1
+    and records Nifty 50 Open/Close for each trade.
 
     Returns:
         (trades_df, summary_metrics, date_summary_df)
@@ -382,9 +384,9 @@ def run_swing_backtest(
         return pd.DataFrame(), {}, pd.DataFrame()
 
     if progress_callback:
-        progress_callback(0.2, f"Fetching historical market data for {len(all_symbols)} candidate stocks...")
+        progress_callback(0.2, f"Fetching historical market data for {len(all_symbols)} candidate stocks & Nifty 50...")
 
-    yf_tickers = [s + ".NS" for s in all_symbols]
+    yf_tickers = [s + ".NS" for s in all_symbols] + ["^NSEI"]
     try:
         hist_data = yf.download(yf_tickers, period="3mo", progress=False)
     except Exception:
@@ -393,8 +395,44 @@ def run_swing_backtest(
     if hist_data.empty:
         return pd.DataFrame(), {}, pd.DataFrame()
 
+    # Extract Nifty 50 historical daily bars
+    nifty_map: Dict[str, Dict[str, float]] = {}
+    if isinstance(hist_data.columns, pd.MultiIndex) and "^NSEI" in hist_data["Close"].columns:
+        n_open_s = hist_data["Open"]["^NSEI"].dropna()
+        n_close_s = hist_data["Close"]["^NSEI"].dropna()
+        for n_dt, o_val in n_open_s.items():
+            dt_str = n_dt.strftime("%Y-%m-%d")
+            c_val = n_close_s.get(n_dt, o_val)
+            chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
+            nifty_map[dt_str] = {
+                "open": round(float(o_val), 2),
+                "close": round(float(c_val), 2),
+                "chg_pct": round(float(chg), 2)
+            }
+
+    if not nifty_map:
+        try:
+            n_raw = yf.download("^NSEI", period="3mo", progress=False)
+            if not n_raw.empty:
+                for n_dt, n_row in n_raw.iterrows():
+                    dt_str = n_dt.strftime("%Y-%m-%d")
+                    o_val = float(n_row["Open"])
+                    c_val = float(n_row["Close"])
+                    chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
+                    nifty_map[dt_str] = {
+                        "open": round(o_val, 2),
+                        "close": round(c_val, 2),
+                        "chg_pct": round(chg, 2)
+                    }
+        except Exception:
+            pass
+
     if progress_callback:
         progress_callback(0.6, "Simulating trades and evaluating Target & Stop Loss hits...")
+
+    # Partial quantity weights
+    w1 = min(max(float(t1_book_pct) / 100.0, 0.0), 1.0)
+    w2 = 1.0 - w1
 
     trade_rows: List[Dict[str, Any]] = []
 
@@ -431,10 +469,13 @@ def run_swing_backtest(
                 if len(dates_after) == 0:
                     trade_rows.append({
                         "Signal Date": sig_date,
+                        "Entry Date": "Pending Next Session",
                         "Symbol": sym,
                         "Market Cap": mcap,
                         "Sector": sector,
-                        "Entry Date": "Pending Next Session",
+                        "Nifty Open": 0.0,
+                        "Nifty Close": 0.0,
+                        "Nifty Chg %": 0.0,
                         "Entry Price": 0.0,
                         "Target 1 Price": 0.0,
                         "Target 2 Price": 0.0,
@@ -451,6 +492,7 @@ def run_swing_backtest(
                     continue
 
                 d1_dt = dates_after[0]
+                entry_date_str = d1_dt.strftime("%Y-%m-%d")
                 d1_row = s_df.loc[d1_dt]
                 entry = float(d1_row["Open"])
 
@@ -485,45 +527,25 @@ def run_swing_backtest(
                     if d_high > peak_high:
                         peak_high = d_high
 
+                    # Check if Target 1 is reached today
+                    hit_t1_today = (d_high >= t1_price)
+                    if hit_t1_today and not t1_hit:
+                        t1_hit = True
+
                     # Update trailing stop loss level
                     if enable_trailing_sl:
                         if trail_trigger == "After Target 1":
-                            if not t1_hit and d_high >= t1_price:
-                                t1_hit = True
-                                current_sl = max(current_sl, entry)  # Breakeven
                             if t1_hit:
+                                current_sl = max(current_sl, entry)  # Move to Breakeven
                                 trail_candidate = peak_high * (1.0 - trailing_sl_pct / 100.0)
                                 current_sl = max(current_sl, trail_candidate)
                         else:  # "From Entry"
                             trail_candidate = peak_high * (1.0 - trailing_sl_pct / 100.0)
                             current_sl = max(current_sl, trail_candidate)
 
-                    # Check intraday exit triggers
-                    if enable_trailing_sl:
-                        # 1. Target 2 reached
-                        if d_high >= t2_price:
-                            outcome = f"🚀 Target 2 Hit (Day {cur_day})"
-                            realized_ret = target_2_pct
-                            exit_price = round(t2_price, 2)
-                            hold_days = cur_day
-                            break
-                        # 2. Stop loss or Trailing stop loss triggered
-                        elif d_low <= current_sl:
-                            hold_days = cur_day
-                            exit_price = round(current_sl, 2)
-                            if current_sl >= entry:
-                                outcome = f"🛡️ Trailing SL Hit (Day {cur_day})"
-                                realized_ret = ((current_sl - entry) / entry) * 100.0
-                            else:
-                                outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
-                                realized_ret = -sl_pct
-                                exit_price = round(initial_sl_price, 2)
-                            break
-                        else:
-                            if d_high >= t1_price:
-                                t1_hit = True
-                    else:
-                        # Fixed Target Mode (No trailing)
+                    # Check exit triggers
+                    # Scenario 1: 100% booked at Target 1 (Full Exit on T1)
+                    if w1 >= 1.0:
                         if d_low <= initial_sl_price:
                             outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
                             realized_ret = -sl_pct
@@ -542,25 +564,69 @@ def run_swing_backtest(
                             exit_price = round(t1_price, 2)
                             hold_days = cur_day
                             break
+                    else:
+                        # Scenario 2: Partial Booking Mode (w1% at T1, w2% rides to T2/Trailing SL)
+                        # Check Target 2 first
+                        if d_high >= t2_price:
+                            hold_days = cur_day
+                            exit_price = round(t2_price, 2)
+                            if t1_hit:
+                                realized_ret = (w1 * target_1_pct) + (w2 * target_2_pct)
+                                outcome = f"🚀 Target 2 Hit ({t1_book_pct:.0f}% T1 + {100-t1_book_pct:.0f}% T2) (Day {cur_day})"
+                            else:
+                                realized_ret = target_2_pct
+                                outcome = f"🚀 Target 2 Hit (Day {cur_day})"
+                            break
+
+                        # Check Stop Loss or Trailing Stop Loss
+                        eff_sl = current_sl if enable_trailing_sl else initial_sl_price
+                        if d_low <= eff_sl:
+                            hold_days = cur_day
+                            exit_price = round(eff_sl, 2)
+                            if t1_hit:
+                                rem_ret = ((eff_sl - entry) / entry) * 100.0
+                                realized_ret = (w1 * target_1_pct) + (w2 * rem_ret)
+                                if eff_sl >= entry:
+                                    outcome = f"🛡️ Trailing SL Hit ({t1_book_pct:.0f}% at T1) (Day {cur_day})"
+                                else:
+                                    outcome = f"🛑 SL Hit on Remainder ({t1_book_pct:.0f}% at T1) (Day {cur_day})"
+                            else:
+                                realized_ret = -sl_pct
+                                outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
+                            break
 
                 # If no trigger hit during evaluated days, exit at final available Close
                 if not outcome:
                     hold_days = days_to_simulate
                     exit_price = round(final_close, 2)
-                    realized_ret = ((final_close - entry) / entry) * 100.0
-                    if t1_hit:
+                    if t1_hit and w1 < 1.0:
+                        rem_ret = ((final_close - entry) / entry) * 100.0
+                        realized_ret = (w1 * target_1_pct) + (w2 * rem_ret)
+                        outcome = f"🎯 Target 1 Booked ({t1_book_pct:.0f}%) + Exited Day {hold_days} Close"
+                    elif t1_hit:
+                        realized_ret = target_1_pct
                         outcome = f"🎯 Target 1 Achieved (Exited Day {hold_days} Close)"
                     else:
+                        realized_ret = ((final_close - entry) / entry) * 100.0
                         outcome = f"⏱️ Exited at Day {hold_days} Close"
 
                 peak_gain_pct = ((peak_high - entry) / entry) * 100.0
 
+                # Nifty metrics for Entry Day
+                n_info = nifty_map.get(entry_date_str, {})
+                n_open = n_info.get("open", 0.0)
+                n_close = n_info.get("close", 0.0)
+                n_chg = n_info.get("chg_pct", 0.0)
+
                 trade_rows.append({
                     "Signal Date": sig_date,
+                    "Entry Date": entry_date_str,
                     "Symbol": sym,
                     "Market Cap": mcap,
                     "Sector": sector,
-                    "Entry Date": d1_dt.strftime("%Y-%m-%d"),
+                    "Nifty Open": n_open,
+                    "Nifty Close": n_close,
+                    "Nifty Chg %": n_chg,
                     "Entry Price": round(entry, 2),
                     "Target 1 Price": round(t1_price, 2),
                     "Target 2 Price": round(t2_price, 2),

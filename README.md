@@ -27,14 +27,16 @@ A dedicated, enterprise-grade institutional intelligence suite tracking Indian e
 Simulate and backtest technical screener signals across historical trading sessions with realistic execution rules:
 - **Execution Rule**: Simulates entering a buy trade at the **Market Open of Day $T+1$** following the screener signal.
 - **Adjustable Holding Horizon**: Configurable holding period from **1 day to 10 days**.
-- **Customizable Targets**:
+- **Customizable Targets & Position Sizing**:
   - **Target 1**: Configurable default of 3.5% (user target 3–4%).
   - **Target 2**: Extended adjustable target (default 6.0%) for runners.
+  - **Partial Quantity Booking on Target 1**: Adjustable slider (10% to 100%, default 50%) to lock in profits at Target 1 while letting the remaining position ride towards Target 2 / Trailing SL.
   - **Initial Stop Loss**: Configurable risk boundary (default 2.0%).
 - **🛡️ Dynamic Trailing Stop Loss**:
   - **Breakeven & Trail after Target 1**: Automatically eliminates downside risk upon touching Target 1 by moving Stop Loss to Entry price (breakeven), then ratchets up to protect peak high gains.
   - **Immediate Trailing**: Continually trails $X\%$ below highest high reached from day 1.
-- **Interactive Visualizations**:
+- **Interactive Visualizations & Benchmark Context**:
+  - **Nifty 50 Context**: Dedicated columns displaying **Nifty Open**, **Nifty Close**, and **Nifty % Change** on each trade's entry day.
   - Donut chart breakdown of trade outcomes (Target 1 Hit, Target 2 Hit, Trailing SL Hit, Stop Loss Hit, Exited at Close).
   - Daily distribution bar charts illustrating target, trailing SL, and stop loss frequencies per session.
   - Date-by-date win rate and return analysis over the last 7 to 30+ trading days.

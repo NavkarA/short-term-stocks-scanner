@@ -126,6 +126,16 @@ def render_backtest_dashboard():
                 key="bt_target_2"
             )
 
+            t1_book_pct = st.slider(
+                "Target 1 Booking Quantity (%)",
+                min_value=10,
+                max_value=100,
+                value=50,
+                step=5,
+                help="Portion of quantity to book on hitting Target 1 (remainder rides to Target 2 / Trailing SL). Default: 50%.",
+                key="bt_t1_book_pct"
+            )
+
             sl_pct = st.slider(
                 "Initial Stop Loss (%)",
                 min_value=0.5,
@@ -231,6 +241,7 @@ def render_backtest_dashboard():
                 enable_trailing_sl=enable_trailing_sl,
                 trailing_sl_pct=trailing_sl_pct,
                 trail_trigger=trail_trigger_val,
+                t1_book_pct=t1_book_pct,
                 progress_callback=update_progress
             )
 
@@ -252,6 +263,7 @@ def render_backtest_dashboard():
                 "enable_trailing_sl": enable_trailing_sl,
                 "trailing_sl_pct": trailing_sl_pct,
                 "trail_mechanism": trail_mechanism,
+                "t1_book_pct": t1_book_pct,
                 "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             st.rerun()
@@ -280,9 +292,10 @@ def render_backtest_dashboard():
     with header_col1:
         st.subheader(f"📊 Backtest Results: {bt['scanner_name']}")
         tsl_label = f"🛡️ Trailing SL: {bt['trailing_sl_pct']}% ({bt['trail_mechanism']})" if bt.get("enable_trailing_sl") else "Fixed SL (No Trailing)"
+        t1_book_info = f" (Book {bt.get('t1_book_pct', 50)}%)" if bt.get("t1_book_pct", 50) < 100 else " (100% Exit)"
         st.caption(
             f"Evaluated Last **{bt['lookback_days']} Trading Days** | "
-            f"Target 1: **+{bt['target_1_pct']}%** | Target 2: **+{bt['target_2_pct']}%** | "
+            f"Target 1: **+{bt['target_1_pct']}%**{t1_book_info} | Target 2: **+{bt['target_2_pct']}%** | "
             f"Stop Loss: **-{bt['sl_pct']}%** | Holding Horizon: **Up to {bt['max_holding_days']} Day(s)** | "
             f"{tsl_label} | Run at: `{bt['run_time']}`"
         )
@@ -518,6 +531,9 @@ def render_backtest_dashboard():
         "Entry Date",
         "Symbol",
         "TradingView",
+        "Nifty Open",
+        "Nifty Close",
+        "Nifty Chg %",
         "Entry Price",
         "Target 1 Price",
         "Target 2 Price",
@@ -537,6 +553,9 @@ def render_backtest_dashboard():
         view_df[present_cols],
         column_config={
             "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart"),
+            "Nifty Open": st.column_config.NumberColumn("Nifty Open", format="₹%,.2f"),
+            "Nifty Close": st.column_config.NumberColumn("Nifty Close", format="₹%,.2f"),
+            "Nifty Chg %": st.column_config.NumberColumn("Nifty Chg %", format="%+.2f%%"),
             "Entry Price": st.column_config.NumberColumn("Entry (₹)", format="₹%.2f"),
             "Target 1 Price": st.column_config.NumberColumn("T1 Price (₹)", format="₹%.2f"),
             "Target 2 Price": st.column_config.NumberColumn("T2 Price (₹)", format="₹%.2f"),
