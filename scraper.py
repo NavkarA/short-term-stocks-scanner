@@ -430,6 +430,49 @@ def run_swing_backtest(
         except Exception:
             pass
 
+    return simulate_swing_trades(
+        hist_data=hist_data,
+        nifty_map=nifty_map,
+        eval_dates=eval_dates,
+        signals_by_date=signals_by_date,
+        target_1_pct=target_1_pct,
+        target_2_pct=target_2_pct,
+        target_3_pct=target_3_pct,
+        sl_pct=sl_pct,
+        max_holding_days=max_holding_days,
+        enable_trailing_sl=enable_trailing_sl,
+        trailing_sl_pct=trailing_sl_pct,
+        trail_trigger=trail_trigger,
+        t1_book_pct=t1_book_pct,
+        t2_book_pct=t2_book_pct,
+        progress_callback=progress_callback
+    )
+
+
+def simulate_swing_trades(
+    hist_data: pd.DataFrame,
+    nifty_map: Dict[str, Dict[str, float]],
+    eval_dates: List[str],
+    signals_by_date: Dict[str, List[Dict[str, str]]],
+    target_1_pct: float = 3.5,
+    target_2_pct: float = 6.0,
+    target_3_pct: float = 10.0,
+    sl_pct: float = 2.0,
+    max_holding_days: int = 3,
+    enable_trailing_sl: bool = False,
+    trailing_sl_pct: float = 2.0,
+    trail_trigger: str = "After Target 1",
+    t1_book_pct: float = 50.0,
+    t2_book_pct: float = 30.0,
+    progress_callback: Optional[Callable[[float, str], None]] = None
+) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
+    """
+    Executes in-memory swing trading simulation given historical OHLCV data and signals.
+    Highly optimized for grid backtesting and real-time dashboard execution.
+    """
+    if hist_data.empty or not eval_dates or not signals_by_date:
+        return pd.DataFrame(), {}, pd.DataFrame()
+
     if progress_callback:
         progress_callback(0.6, "Simulating trades and evaluating Target & Stop Loss hits...")
 
