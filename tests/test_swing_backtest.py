@@ -61,3 +61,92 @@ def test_run_swing_backtest_3_tier_targets_and_weights():
     assert "Prev Day Return %" in row
     assert "Target 3 Hits" in date_summary.columns
     assert "t3_hit_count" in summary
+
+
+def test_intraday_ambiguity_conservative_vs_optimistic():
+    # Day 0: Signal Day
+    # Day 1: Entry Day with wide whipsaw: High touches +4%, Low touches -3%
+    mock_dates = pd.date_range("2026-03-01", periods=3, freq="B")
+    mock_df = pd.DataFrame(
+        {
+            ("Open", "TEST.NS"): [100.0, 100.0, 100.0],
+            ("High", "TEST.NS"): [101.0, 104.5, 102.0],  # Day 1 touches +4.5% (above Target 1 3.5%)
+            ("Low", "TEST.NS"):  [99.0,  97.0,  99.0],   # Day 1 touches -3.0% (below SL 2.0%)
+            ("Close", "TEST.NS"): [100.0, 101.0, 100.0],
+            ("Volume", "TEST.NS"): [1000, 1000, 1000],
+            ("Open", "^NSEI"): [22000.0] * 3,
+            ("High", "^NSEI"): [22100.0] * 3,
+            ("Low", "^NSEI"): [21900.0] * 3,
+            ("Close", "^NSEI"): [22050.0] * 3,
+            ("Volume", "^NSEI"): [5000] * 3,
+        },
+        index=mock_dates
+    )
+    mock_df.columns = pd.MultiIndex.from_tuples(mock_df.columns)
+    sig_date = mock_dates[0].strftime("%Y-%m-%d")
+    signals = {sig_date: [{"symbol": "TEST", "name": "Test Company"}]}
+
+    # 1. Conservative Mode: Stop loss must be assumed hit first
+    with patch("yfinance.download", return_value=mock_df):
+        trades_cons, _, _ = run_swing_backtest(
+            signals_by_date=signals,
+            target_1_pct=3.5,
+            sl_pct=2.0,
+            intraday_ambiguity="Conservative (SL First)"
+        )
+    assert not trades_cons.empty
+    row_cons = trades_cons.iloc[0]
+    assert "Stop Loss Hit" in row_cons["Outcome"]
+    assert row_cons["Realized Return %"] == -2.0
+
+    # 2. Optimistic Mode: Target must be assumed hit first
+    with patch("yfinance.download", return_value=mock_df):
+        trades_opt, _, _ = run_swing_backtest(
+            signals_by_date=signals,
+            target_1_pct=3.5,
+            sl_pct=2.0,
+            intraday_ambiguity="Optimistic (Target First)"
+        )
+    assert not trades_opt.empty
+    row_opt = trades_opt.iloc[0]
+    # In optimistic mode, T1 was booked first
+    assert "T1" in row_opt["Outcome"] or "Target 1" in row_opt["Outcome"]
+    assert row_opt["Realized Return %"] > -2.0
+
+
+def test_intraday_ambiguity_proximity():
+    # Day 1: Open 100.0. Target +1.0% (101.0), SL -3.0% (97.0).
+    # High touches 102.0, Low touches 96.0.
+    # Open is closer to Target (1.0 vs 3.0), so proximity should choose Target first!
+    mock_dates = pd.date_range("2026-03-01", periods=3, freq="B")
+    mock_df = pd.DataFrame(
+        {
+            ("Open", "TEST.NS"): [100.0, 100.0, 100.0],
+            ("High", "TEST.NS"): [101.0, 102.0, 100.0],
+            ("Low", "TEST.NS"):  [99.0,  96.0,  99.0],
+            ("Close", "TEST.NS"): [100.0, 100.0, 100.0],
+            ("Volume", "TEST.NS"): [1000, 1000, 1000],
+            ("Open", "^NSEI"): [22000.0] * 3,
+            ("High", "^NSEI"): [22100.0] * 3,
+            ("Low", "^NSEI"): [21900.0] * 3,
+            ("Close", "^NSEI"): [22050.0] * 3,
+            ("Volume", "^NSEI"): [5000] * 3,
+        },
+        index=mock_dates
+    )
+    mock_df.columns = pd.MultiIndex.from_tuples(mock_df.columns)
+    sig_date = mock_dates[0].strftime("%Y-%m-%d")
+    signals = {sig_date: [{"symbol": "TEST", "name": "Test Company"}]}
+
+    with patch("yfinance.download", return_value=mock_df):
+        trades_prox, _, _ = run_swing_backtest(
+            signals_by_date=signals,
+            target_1_pct=1.0,
+            sl_pct=3.0,
+            intraday_ambiguity="Proximity (Closer Level First)"
+        )
+    assert not trades_prox.empty
+    row_prox = trades_prox.iloc[0]
+    # Since target was closer to Open, target was hit first
+    assert "T1" in row_prox["Outcome"] or "Target 1" in row_prox["Outcome"]
+

@@ -37,6 +37,11 @@ Simulate and backtest technical screener signals across historical trading sessi
 - **🛡️ Dynamic Trailing Stop Loss**:
   - **Breakeven & Trail after Target 1**: Automatically eliminates downside risk upon touching Target 1 by moving Stop Loss to Entry price (breakeven), then ratchets up to protect peak high gains.
   - **Immediate Trailing**: Continually trails $X\%$ below highest high reached from day 1.
+- **⏱️ Realistic Intraday Ambiguity Handling (NEW)**:
+  - **Conservative (Stop Loss First - Recommended)**: When both Target and Stop Loss fall within the same day's range $[Low, High]$, assumes Stop Loss was triggered first to eliminate optimistic bias.
+  - **Optimistic (Target First)**: Assumes Target was reached before dropping to Stop Loss.
+  - **Proximity (Closer Level First)**: Assumes the price level closer to the Day's Open was reached first.
+  - **Opening Gap Protection**: Realistically triggers exits immediately at Open if the session gaps below SL or above Target.
 - **Interactive Visualizations & Benchmark Context**:
   - **Daily Breakdown & Win Rates Table**: Displays **Nifty Open**, **Nifty Close**, and **Nifty % Change** alongside session win rates, Target 1/2/3 hits, and trailing SL executions.
   - Donut chart breakdown of trade outcomes (Target 1 Hit, Target 2 Hit, Target 3 Hit, Trailing SL Hit, Stop Loss Hit, Exited at Close).

@@ -206,6 +206,25 @@ def render_backtest_dashboard():
                 trailing_sl_pct = 2.0
                 trail_mechanism = "Move to Breakeven & Trail after Target 1"
 
+            # Intraday Ambiguity Handling Controls
+            st.markdown("#### ⏱️ Intraday Ambiguity Handling")
+            intraday_ambiguity = st.selectbox(
+                "Intraday Conflict Resolution",
+                [
+                    "Conservative (SL First - Recommended)",
+                    "Optimistic (Target First)",
+                    "Proximity (Closer Level First)"
+                ],
+                index=0,
+                help=(
+                    "On daily OHLC candles, if BOTH Target and Stop Loss fall within the same day's range [Low, High]:\n\n"
+                    "• Conservative: Assumes Stop Loss was hit first (eliminates optimistic bias, recommended for realistic risk modeling).\n"
+                    "• Optimistic: Assumes Target was hit first before dropping to Stop Loss.\n"
+                    "• Proximity: Assumes the level closer to the Day's Open price was reached first."
+                ),
+                key="bt_intraday_ambiguity"
+            )
+
         st.markdown("---")
         btn_col1, btn_col2 = st.columns([1, 3])
         with btn_col1:
@@ -268,6 +287,7 @@ def render_backtest_dashboard():
                 trail_trigger=trail_trigger_val,
                 t1_book_pct=t1_book_pct,
                 t2_book_pct=t2_book_pct,
+                intraday_ambiguity=intraday_ambiguity,
                 progress_callback=update_progress
             )
 
@@ -292,6 +312,7 @@ def render_backtest_dashboard():
                 "trail_mechanism": trail_mechanism,
                 "t1_book_pct": t1_book_pct,
                 "t2_book_pct": t2_book_pct,
+                "intraday_ambiguity": intraday_ambiguity,
                 "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             st.rerun()
@@ -323,13 +344,14 @@ def render_backtest_dashboard():
         t1_b = bt.get("t1_book_pct", 50)
         t2_b = bt.get("t2_book_pct", 30)
         t3_b = max(0, 100 - t1_b - t2_b)
+        ambig_label = bt.get("intraday_ambiguity", "Conservative (SL First)").split("(")[0].strip()
         st.caption(
             f"Evaluated Last **{bt['lookback_days']} Trading Days** | "
             f"Target 1: **+{bt['target_1_pct']}%** (Book {t1_b}%) | "
             f"Target 2: **+{bt['target_2_pct']}%** (Book {t2_b}%) | "
             f"Target 3: **+{bt.get('target_3_pct', 10.0)}%** (Runner {t3_b}%) | "
             f"Stop Loss: **-{bt['sl_pct']}%** | Holding Horizon: **Up to {bt['max_holding_days']} Day(s)** | "
-            f"{tsl_label} | Run at: `{bt['run_time']}`"
+            f"{tsl_label} | Ambiguity: **{ambig_label}** | Run at: `{bt['run_time']}`"
         )
     with header_col2:
         csv_bytes = trades_df.to_csv(index=False).encode("utf-8")

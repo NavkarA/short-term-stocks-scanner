@@ -370,6 +370,7 @@ def run_swing_backtest(
     trail_trigger: str = "After Target 1",
     t1_book_pct: float = 50.0,
     t2_book_pct: float = 30.0,
+    intraday_ambiguity: str = "Conservative (SL First)",
     progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
     """
@@ -457,6 +458,7 @@ def run_swing_backtest(
         trail_trigger=trail_trigger,
         t1_book_pct=t1_book_pct,
         t2_book_pct=t2_book_pct,
+        intraday_ambiguity=intraday_ambiguity,
         progress_callback=progress_callback
     )
 
@@ -476,6 +478,7 @@ def simulate_swing_trades(
     trail_trigger: str = "After Target 1",
     t1_book_pct: float = 50.0,
     t2_book_pct: float = 30.0,
+    intraday_ambiguity: str = "Conservative (SL First)",
     progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
     """
@@ -628,11 +631,68 @@ def simulate_swing_trades(
                     cur_row = s_df.loc[cur_dt]
                     cur_day = day_idx + 1
 
+                    d_open = float(cur_row["Open"])
                     d_high = float(cur_row["High"])
                     d_low = float(cur_row["Low"])
                     d_close = float(cur_row["Close"])
                     final_close = d_close
 
+                    eff_sl = current_sl if enable_trailing_sl else initial_sl_price
+
+                    # Determine next active target price
+                    next_target = None
+                    if not t1_hit:
+                        next_target = t1_price
+                    elif not t2_hit:
+                        next_target = t2_price
+                    elif not t3_hit:
+                        next_target = t3_price
+
+                    sl_breached = (d_low <= eff_sl)
+                    target_breached = (next_target is not None and d_high >= next_target)
+
+                    # Determine if Stop Loss hit before Target on conflict days
+                    sl_first = False
+                    if sl_breached and target_breached:
+                        if d_open <= eff_sl:
+                            # Opened at/below SL: breached before any intraday rally
+                            sl_first = True
+                        elif d_open >= next_target:
+                            # Opened at/above Target: target hit at open before intraday dip
+                            sl_first = False
+                        elif "Conservative" in intraday_ambiguity or intraday_ambiguity == "SL First":
+                            sl_first = True
+                        elif "Optimistic" in intraday_ambiguity or intraday_ambiguity == "Target First":
+                            sl_first = False
+                        elif "Proximity" in intraday_ambiguity:
+                            dist_to_sl = abs(d_open - eff_sl)
+                            dist_to_target = abs(next_target - d_open)
+                            sl_first = (dist_to_sl <= dist_to_target)
+                        else:
+                            sl_first = True
+                    elif sl_breached and not target_breached:
+                        sl_first = True
+
+                    if sl_first:
+                        hold_days = cur_day
+                        exit_price = round(d_open if d_open < eff_sl else eff_sl, 2)
+                        rem_ret = ((exit_price - entry) / entry) * 100.0
+                        booked_return += active_weight * rem_ret
+                        active_weight = 0.0
+                        realized_ret = booked_return
+
+                        if t2_hit:
+                            outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day})"
+                        elif t1_hit:
+                            if eff_sl >= entry:
+                                outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day})"
+                            else:
+                                outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day})"
+                        else:
+                            outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
+                        break
+
+                    # Target evaluation (when Target assumed first or only Target breached)
                     if d_high > peak_high:
                         peak_high = d_high
 
@@ -688,12 +748,12 @@ def simulate_swing_trades(
                             trail_candidate = peak_high * (1.0 - trailing_sl_pct / 100.0)
                             current_sl = max(current_sl, trail_candidate)
 
-                    # Check Stop Loss / Trailing Stop Loss
-                    eff_sl = current_sl if enable_trailing_sl else initial_sl_price
-                    if d_low <= eff_sl:
+                    # Check Stop Loss / Trailing Stop Loss on remaining weight
+                    eff_sl_after = current_sl if enable_trailing_sl else initial_sl_price
+                    if d_low <= eff_sl_after and active_weight > 0:
                         hold_days = cur_day
-                        exit_price = round(eff_sl, 2)
-                        rem_ret = ((eff_sl - entry) / entry) * 100.0
+                        exit_price = round(eff_sl_after, 2)
+                        rem_ret = ((eff_sl_after - entry) / entry) * 100.0
                         booked_return += active_weight * rem_ret
                         active_weight = 0.0
                         realized_ret = booked_return
@@ -701,7 +761,7 @@ def simulate_swing_trades(
                         if t2_hit:
                             outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day})"
                         elif t1_hit:
-                            if eff_sl >= entry:
+                            if eff_sl_after >= entry:
                                 outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day})"
                             else:
                                 outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day})"
@@ -828,7 +888,8 @@ def simulate_swing_trades(
             "profit_factor": round(profit_factor, 2),
             "best_stock": f"{best_row['Symbol']} ({best_row['Realized Return %']:+.2f}%)",
             "worst_stock": f"{worst_row['Symbol']} ({worst_row['Realized Return %']:+.2f}%)",
-            "evaluated_dates_count": len(eval_dates)
+            "evaluated_dates_count": len(eval_dates),
+            "intraday_ambiguity": intraday_ambiguity
         }
 
         # Date-by-date summary
