@@ -23,17 +23,29 @@ A dedicated, enterprise-grade institutional intelligence suite tracking Indian e
 - **🧠 7. Institutional Consensus**: Multi-institutional consensus matrix combining MF, FII, and DII trends with sector-level flow tables and an interactive sector heatmap.
 - **📜 8. Historical Data & Sync**: Pipeline synchronization manager with "🔄 Update Institutional Data" trigger, data freshness badges, audit logs, and direct database exports.
 
-### 2. ⚡ Live Technical Screener Presets
+### 2. 🔬 1-2 Day Swing Strategy Backtest Engine (NEW)
+Simulate and backtest technical screener signals across historical trading sessions with realistic execution rules:
+- **Execution Rule**: Simulates entering a buy trade at the **Market Open of Day $T+1$** following the screener signal.
+- **Holding Horizon**: Hold for **1 or 2 days** to evaluate short-term momentum.
+- **Customizable Targets**:
+  - **Target 1**: Configurable default of 3.5% (user target 3–4%).
+  - **Target 2**: Extended adjustable target (default 6.0%) for runners.
+  - **Stop Loss**: Configurable risk boundary (default 2.0%).
+- **Interactive Visualizations**:
+  - Donut chart breakdown of trade outcomes (Target 1 Hit, Target 2 Hit, Stop Loss Hit, Exited at Close).
+  - Daily distribution bar charts illustrating target and stop loss frequencies per session.
+  - Date-by-date win rate and return analysis over the last 7 to 30+ trading days.
+  - Full stock-by-stock trade log with direct TradingView charting links and CSV export.
+
+### 3. ⚡ Live Technical Screener Presets
 - **Short Term Breakouts** (`chartink.com/screener/short-term-breakouts`)
-- **Consolidated Breakout (SMA Convergence)**
-- **Volume Shockers (Volume > 2x 20 SMA)**
-- **20 EMA Pullback Bounce**
-- **Bullish Engulfing Pattern**
-- **About to Break (BTST / Bull Run)**
-- **Volatility Contraction Pattern (VCP)**
+- **Consolidated Breakout (52-Week High)**
+- **About to Break (Multi-Year Breakout)**
+- **Volatility Compression (NR4/NR7 Contraction)**
+- **Bullish Engulfing Pattern (Daily)**
 - **Watchlist & Notes**: Persisted local watchlist in `watchlist.json`.
 
-### 3. 🎯 Screener Institutional Integration
+### 4. 🎯 Screener Institutional Integration
 Cross-reference technical breakout candidates against institutional activity with optional sidebar filters:
 - ☐ MF Holding Increased
 - ☐ FII Holding Increased

@@ -13,6 +13,8 @@ from typing import Dict, List, Any, Optional
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 import requests
 import streamlit as st
 
@@ -21,7 +23,10 @@ from scraper import (
     PRESET_SCANNERS,
     CHARTINK_BASE_URL,
     extract_clause_from_url,
+    chartink_historical_signals,
+    run_swing_backtest,
 )
+from backtest_ui import render_backtest_dashboard
 from institutional.ui.main import render_institutional_activity_page
 from institutional.db.repository import InstitutionalRepository
 from institutional.calculations.scoring import calculate_institutional_consensus
@@ -118,6 +123,7 @@ nav_module = st.sidebar.radio(
     "Choose Module",
     [
         "⚡ Live Technical Screener",
+        "🔬 1-2 Day Swing Backtest",
         "🏦 Institutional Activity"
     ],
     index=0,
@@ -133,7 +139,13 @@ if nav_module == "🏦 Institutional Activity":
     render_institutional_activity_page()
 
 # ==========================================
-# ROUTE 2: ⚡ LIVE TECHNICAL SCREENER
+# ROUTE 2: 🔬 1-2 DAY SWING BACKTEST
+# ==========================================
+elif nav_module == "🔬 1-2 Day Swing Backtest":
+    render_backtest_dashboard()
+
+# ==========================================
+# ROUTE 3: ⚡ LIVE TECHNICAL SCREENER
 # ==========================================
 else:
     st.sidebar.title("⚡ Scanner Controls")
@@ -337,6 +349,7 @@ else:
             st.caption(f"Last updated: `{st.session_state.last_scan_time}` | Active Scanner: `{selected_scanner}`")
 
         st.markdown("---")
+        st.info("💡 **Swing Strategy Backtester**: Test these signals with next-day open entry & 3-4% targets by selecting **'🔬 1-2 Day Swing Backtest'** in the left sidebar!")
 
         col_act1, col_act2 = st.columns([3, 1])
         with col_act1:
