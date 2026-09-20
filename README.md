@@ -44,12 +44,21 @@ Simulate and backtest technical screener signals across historical trading sessi
   - Date-by-date win rate and return analysis over the last 7 to 30+ trading days.
   - Full stock-by-stock trade log with Target 1, Target 2, and Target 3 prices, direct TradingView charting links, and CSV export.
 
-### 3. ⚡ Live Technical Screener Presets
-- **Short Term Breakouts** (`chartink.com/screener/short-term-breakouts`)
-- **Consolidated Breakout (52-Week High)**
-- **About to Break (Multi-Year Breakout)**
-- **Volatility Compression (NR4/NR7 Contraction)**
-- **Bullish Engulfing Pattern (Daily)**
+### 3. ⚡ Live Technical Screener Presets & Fundamental Enrichment
+- **Curated Breakout Presets**:
+  - **Short Term Breakouts** (`chartink.com/screener/short-term-breakouts`)
+  - **Consolidated Breakout (52-Week High)**
+  - **About to Break (Multi-Year Breakout)**
+  - **Volatility Compression (NR4/NR7 Contraction)**
+  - **Bullish Engulfing Pattern (Daily)**
+- **Valuation & Fundamentals Integration (NEW)**:
+  - **P/E Ratio** vs **Industry P/E Benchmark**: Compare stock valuation against peer sector multiples.
+  - **Market Cap (₹ Cr)**: Exact numeric market capitalization in Indian Crores.
+  - **YoY Revenue Growth %** & **YoY Net Profit (PAT) Growth %**: Trailing annual audited growth rates.
+  - **1-Week & 1-Month Volume Growth %**: Detect expanding institutional accumulation volume prior to entry.
+  - **Key Quality Metrics**: Return on Equity (ROE %), Debt-to-Equity (D/E), and Operating Profit Margin (OPM %).
+- **Interactive Fundamental & Quality Filters**:
+  - Filter breakout candidates by Max P/E, Min YoY Revenue Growth %, Min YoY Profit Growth %, Min 1W Volume Growth %, Min ROE %, and Max Debt-to-Equity.
 - **Watchlist & Notes**: Persisted local watchlist in `watchlist.json`.
 
 ### 4. 🎯 Screener Institutional Integration

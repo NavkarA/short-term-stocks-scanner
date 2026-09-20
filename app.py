@@ -17,6 +17,9 @@ import plotly.graph_objects as go
 import plotly.express as px
 import requests
 import streamlit as st
+import yfinance as yf
+
+from fundamentals import get_batch_fundamentals, compute_volume_growth_from_series
 
 from scraper import (
     chartink_scraper,
@@ -210,6 +213,15 @@ else:
         min_fii_inc_pct = st.number_input("Minimum FII holding increase (%)", value=0.0, step=0.2, key="num_fii_inc_pct")
         min_mf_cons_score = st.number_input("Minimum MF consensus score", value=0.0, step=5.0, key="num_mf_cons_score")
 
+    with st.sidebar.expander("📊 Financial & Quality Filters", expanded=False):
+        st.caption("Filter stocks based on valuation, growth, margins, and volume expansion.")
+        f_max_pe = st.number_input("Max P/E Ratio (0 = No limit)", min_value=0.0, max_value=250.0, value=0.0, step=5.0, key="num_max_pe")
+        f_min_rev = st.number_input("Min YoY Revenue Growth (%)", min_value=-100.0, max_value=200.0, value=-100.0, step=5.0, key="num_min_rev")
+        f_min_pat = st.number_input("Min YoY Profit Growth (%)", min_value=-100.0, max_value=500.0, value=-100.0, step=5.0, key="num_min_pat")
+        f_min_vol_1w = st.number_input("Min 1W Volume Growth (%)", min_value=-100.0, max_value=500.0, value=-100.0, step=10.0, key="num_min_vol_1w")
+        f_min_roe = st.number_input("Min Return on Equity - ROE (%)", min_value=-50.0, max_value=100.0, value=-50.0, step=5.0, key="num_min_roe")
+        f_max_de = st.number_input("Max Debt-to-Equity (0 = No limit)", min_value=0.0, max_value=10.0, value=0.0, step=0.5, key="num_max_de")
+
     # ==========================================
     # SINGLE SCAN EXECUTION LOGIC
     # ==========================================
@@ -376,6 +388,53 @@ else:
                 lambda s: f"https://chartink.com/stocks/{s}.html"
             )
 
+            # Fetch fundamentals for scanned symbols
+            tickers = display_df["nsecode"].tolist()
+            fund_map = get_batch_fundamentals(tickers)
+
+            # Fetch recent volume series for volume growth metrics
+            vol_growth_map = {}
+            try:
+                yf_tickers = [s + ".NS" for s in tickers]
+                v_hist = yf.download(yf_tickers, period="3mo", progress=False)
+                if not v_hist.empty and "Volume" in v_hist.columns:
+                    for sym in tickers:
+                        ns_col = sym + ".NS"
+                        if isinstance(v_hist["Volume"].columns, pd.Index) and ns_col in v_hist["Volume"].columns:
+                            v_s = v_hist["Volume"][ns_col].dropna()
+                            vol_growth_map[sym] = compute_volume_growth_from_series(v_s)
+                        elif not isinstance(v_hist["Volume"], pd.DataFrame):
+                            v_s = v_hist["Volume"].dropna()
+                            vol_growth_map[sym] = compute_volume_growth_from_series(v_s)
+            except Exception:
+                pass
+
+            display_df["Sector"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("sector", "Other"))
+            display_df["PE_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("pe_ratio", 0.0))
+            display_df["Ind_PE_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("industry_pe", 22.0))
+            display_df["MCap_Cr"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("market_cap_cr", 0.0))
+            display_df["YoY_Rev_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("yoy_revenue_growth_pct", 0.0))
+            display_df["YoY_PAT_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("yoy_profit_growth_pct", 0.0))
+            display_df["Vol_1W_val"] = display_df["nsecode"].map(lambda s: vol_growth_map.get(s, (0.0, 0.0))[0])
+            display_df["Vol_1M_val"] = display_df["nsecode"].map(lambda s: vol_growth_map.get(s, (0.0, 0.0))[1])
+            display_df["ROE_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("roe_pct", 0.0))
+            display_df["DE_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("debt_to_equity", 0.0))
+            display_df["OPM_val"] = display_df["nsecode"].map(lambda s: fund_map.get(s, {}).get("operating_margin_pct", 0.0))
+
+            # Apply quality filters if active
+            if f_max_pe > 0:
+                display_df = display_df[(display_df["PE_val"] > 0) & (display_df["PE_val"] <= f_max_pe)]
+            if f_min_rev > -100.0:
+                display_df = display_df[display_df["YoY_Rev_val"] >= f_min_rev]
+            if f_min_pat > -100.0:
+                display_df = display_df[display_df["YoY_PAT_val"] >= f_min_pat]
+            if f_min_vol_1w > -100.0:
+                display_df = display_df[display_df["Vol_1W_val"] >= f_min_vol_1w]
+            if f_min_roe > -50.0:
+                display_df = display_df[display_df["ROE_val"] >= f_min_roe]
+            if f_max_de > 0:
+                display_df = display_df[(display_df["DE_val"] > 0) & (display_df["DE_val"] <= f_max_de)]
+
             # Enrich with institutional data if available in DB
             repo = InstitutionalRepository()
             inst_map = {}
@@ -401,8 +460,19 @@ else:
             formatted_table = pd.DataFrame({
                 "Ticker": display_df["nsecode"],
                 "Company Name": display_df["name"],
-                "Close (₹)": display_df["close"].map("{:,.2f}".format),
-                "% Change": display_df["per_chg"].map("{:+.2f}%".format),
+                "Sector": display_df["Sector"],
+                "Close (₹)": display_df["close"],
+                "% Change": display_df["per_chg"],
+                "P/E": display_df["PE_val"],
+                "Ind P/E": display_df["Ind_PE_val"],
+                "M.Cap (₹ Cr)": display_df["MCap_Cr"],
+                "YoY Rev %": display_df["YoY_Rev_val"],
+                "YoY PAT %": display_df["YoY_PAT_val"],
+                "1W Vol %": display_df["Vol_1W_val"],
+                "1M Vol %": display_df["Vol_1M_val"],
+                "ROE %": display_df["ROE_val"],
+                "D/E": display_df["DE_val"],
+                "OPM %": display_df["OPM_val"],
                 "Volume": display_df["volume"].apply(format_volume),
                 "Turnover": display_df["Turnover_Cr"].map("₹{:,.2f} Cr".format),
                 "MF Holding": display_df["MF_Holding"],
@@ -415,6 +485,18 @@ else:
             st.dataframe(
                 formatted_table,
                 column_config={
+                    "Close (₹)": st.column_config.NumberColumn("Close (₹)", format="₹%.2f"),
+                    "% Change": st.column_config.NumberColumn("% Change", format="%+.2f%%"),
+                    "P/E": st.column_config.NumberColumn("P/E", format="%.1f"),
+                    "Ind P/E": st.column_config.NumberColumn("Ind P/E", format="%.1f"),
+                    "M.Cap (₹ Cr)": st.column_config.NumberColumn("M.Cap (₹ Cr)", format="₹%,.0f Cr"),
+                    "YoY Rev %": st.column_config.NumberColumn("YoY Rev %", format="%+.1f%%"),
+                    "YoY PAT %": st.column_config.NumberColumn("YoY PAT %", format="%+.1f%%"),
+                    "1W Vol %": st.column_config.NumberColumn("1W Vol %", format="%+.1f%%"),
+                    "1M Vol %": st.column_config.NumberColumn("1M Vol %", format="%+.1f%%"),
+                    "ROE %": st.column_config.NumberColumn("ROE %", format="%.1f%%"),
+                    "D/E": st.column_config.NumberColumn("D/E", format="%.2f"),
+                    "OPM %": st.column_config.NumberColumn("OPM %", format="%.1f%%"),
                     "TradingView Link": st.column_config.LinkColumn("TradingView", display_text="Open Chart ↗"),
                     "Chartink Link": st.column_config.LinkColumn("Chartink", display_text="View on Chartink ↗"),
                 },

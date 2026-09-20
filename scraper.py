@@ -14,6 +14,8 @@ import pandas as pd
 import yfinance as yf
 from bs4 import BeautifulSoup as bs
 
+from fundamentals import get_stock_fundamentals, compute_volume_growth_from_series
+
 CHARTINK_BASE_URL = "https://chartink.com/screener/consolidatedbo"
 CHARTINK_PROCESS_URL = "https://chartink.com/screener/process"
 CHARTINK_BACKTEST_URL = "https://chartink.com/backtest/process"
@@ -512,6 +514,10 @@ def simulate_swing_trades(
                 if s_df.empty:
                     continue
 
+                f_info = get_stock_fundamentals(sym)
+                vol_series_sig = s_df.loc[s_df.index <= sig_ts, "Volume"] if "Volume" in s_df.columns else pd.Series(dtype=float)
+                vol_1w, vol_1m = compute_volume_growth_from_series(vol_series_sig)
+
                 dates_after = s_df.index[s_df.index > sig_ts]
                 if len(dates_after) == 0:
                     prior_dates = s_df.index[s_df.index <= sig_ts]
@@ -532,7 +538,18 @@ def simulate_swing_trades(
                         "Entry Date": "Pending Next Session",
                         "Symbol": sym,
                         "Market Cap": mcap,
-                        "Sector": sector,
+                        "Market Cap (₹ Cr)": f_info.get("market_cap_cr", 0.0),
+                        "Sector": sector or f_info.get("sector", "Other"),
+                        "Industry": f_info.get("industry", "Other"),
+                        "P/E Ratio": f_info.get("pe_ratio", 0.0),
+                        "Industry P/E": f_info.get("industry_pe", 22.0),
+                        "YoY Rev Growth %": f_info.get("yoy_revenue_growth_pct", 0.0),
+                        "YoY Profit Growth %": f_info.get("yoy_profit_growth_pct", 0.0),
+                        "Volume Growth 1W %": vol_1w,
+                        "Volume Growth 1M %": vol_1m,
+                        "ROE %": f_info.get("roe_pct", 0.0),
+                        "Debt to Equity": f_info.get("debt_to_equity", 0.0),
+                        "Operating Margin %": f_info.get("operating_margin_pct", 0.0),
                         "Prev Day Return %": p_ret,
                         "Nifty Open": 0.0,
                         "Nifty Close": 0.0,
@@ -712,7 +729,18 @@ def simulate_swing_trades(
                     "Entry Date": entry_date_str,
                     "Symbol": sym,
                     "Market Cap": mcap,
-                    "Sector": sector,
+                    "Market Cap (₹ Cr)": f_info.get("market_cap_cr", 0.0),
+                    "Sector": sector or f_info.get("sector", "Other"),
+                    "Industry": f_info.get("industry", "Other"),
+                    "P/E Ratio": f_info.get("pe_ratio", 0.0),
+                    "Industry P/E": f_info.get("industry_pe", 22.0),
+                    "YoY Rev Growth %": f_info.get("yoy_revenue_growth_pct", 0.0),
+                    "YoY Profit Growth %": f_info.get("yoy_profit_growth_pct", 0.0),
+                    "Volume Growth 1W %": vol_1w,
+                    "Volume Growth 1M %": vol_1m,
+                    "ROE %": f_info.get("roe_pct", 0.0),
+                    "Debt to Equity": f_info.get("debt_to_equity", 0.0),
+                    "Operating Margin %": f_info.get("operating_margin_pct", 0.0),
                     "Prev Day Return %": prev_day_return_pct,
                     "Nifty Open": n_open,
                     "Nifty Close": n_close,
