@@ -79,37 +79,46 @@ def get_or_fetch_market_data(num_days: int = 14) -> Tuple[Dict[str, List[Dict[st
 
     # Fetch market data
     yf_tickers = [s + ".NS" for s in all_symbols] + ["^NSEI"]
-    print("📈 Downloading 3-month OHLCV data for all tickers and Nifty 50 (^NSEI)...")
-    hist_data = yf.download(yf_tickers, period="3mo", progress=False)
+    print("📈 Downloading 60-day 5-minute OHLCV data for all tickers and Nifty 50 (^NSEI)...")
+    hist_data = yf.download(
+        yf_tickers,
+        period="60d",
+        interval="5m",
+        auto_adjust=False,
+        progress=False
+    )
 
-    # Build Nifty map
+    # Build Nifty map from 5m bars
     nifty_map = {}
     if isinstance(hist_data.columns, pd.MultiIndex) and "^NSEI" in hist_data["Close"].columns:
-        n_open_s = hist_data["Open"]["^NSEI"].dropna()
-        n_close_s = hist_data["Close"]["^NSEI"].dropna()
-        for n_dt, o_val in n_open_s.items():
-            dt_str = n_dt.strftime("%Y-%m-%d")
-            c_val = n_close_s.get(n_dt, o_val)
-            chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
-            nifty_map[dt_str] = {
-                "open": round(float(o_val), 2),
-                "close": round(float(c_val), 2),
-                "chg_pct": round(float(chg), 2)
-            }
-
-    if not nifty_map:
-        n_raw = yf.download("^NSEI", period="3mo", progress=False)
-        if not n_raw.empty:
-            for n_dt, n_row in n_raw.iterrows():
-                dt_str = n_dt.strftime("%Y-%m-%d")
-                o_val = float(n_row["Open"])
-                c_val = float(n_row["Close"])
+        n_df = pd.DataFrame({
+            "Open": hist_data["Open"]["^NSEI"],
+            "Close": hist_data["Close"]["^NSEI"]
+        }).dropna()
+        for d_str, grp in n_df.groupby(n_df.index.strftime("%Y-%m-%d")):
+            if not grp.empty:
+                o_val = float(grp.iloc[0]["Open"])
+                c_val = float(grp.iloc[-1]["Close"])
                 chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
-                nifty_map[dt_str] = {
+                nifty_map[d_str] = {
                     "open": round(o_val, 2),
                     "close": round(c_val, 2),
                     "chg_pct": round(chg, 2)
                 }
+
+    if not nifty_map:
+        n_raw = yf.download("^NSEI", period="60d", interval="5m", auto_adjust=False, progress=False)
+        if not n_raw.empty:
+            for d_str, grp in n_raw.groupby(n_raw.index.strftime("%Y-%m-%d")):
+                if not grp.empty:
+                    o_val = float(grp.iloc[0]["Open"])
+                    c_val = float(grp.iloc[-1]["Close"])
+                    chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
+                    nifty_map[d_str] = {
+                        "open": round(o_val, 2),
+                        "close": round(c_val, 2),
+                        "chg_pct": round(chg, 2)
+                    }
 
     return signals_by_date, eval_dates, hist_data, nifty_map
 

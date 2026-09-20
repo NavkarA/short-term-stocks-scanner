@@ -86,11 +86,11 @@ def render_backtest_dashboard():
             st.markdown("#### 📅 Backtest Scope & Holding Period")
             lookback_days = st.slider(
                 "Historical Trading Days to Evaluate",
-                min_value=5,
-                max_value=30,
+                min_value=3,
+                max_value=35,
                 value=7,
                 step=1,
-                help="Number of past trading sessions to evaluate (Default: at least 7 days).",
+                help="Number of past trading sessions to evaluate using strict 5-minute candle data (Yahoo Finance intraday limit: 60 calendar days / ~35-40 trading days).",
                 key="bt_lookback_days"
             )
 
@@ -236,7 +236,7 @@ def render_backtest_dashboard():
             )
         with btn_col2:
             st.caption(
-                f"Rule: Buy at Open of Day $T+1$. Holds for up to **{max_holding_days} day(s)**. "
+                f"Rule: Buy strictly at **09:15 Open** of Day $T+1$ with **5-minute candle evaluation**. Holds for up to **{max_holding_days} day(s)**. "
                 f"Targets: +{target_1_pct}% / +{target_2_pct}% / +{target_3_pct}%. Stop Loss: -{sl_pct}%"
                 f"{f' with {trailing_sl_pct}% Trailing SL' if enable_trailing_sl else ''}."
             )
@@ -346,7 +346,7 @@ def render_backtest_dashboard():
         t3_b = max(0, 100 - t1_b - t2_b)
         ambig_label = bt.get("intraday_ambiguity", "Conservative (SL First)").split("(")[0].strip()
         st.caption(
-            f"Evaluated Last **{bt['lookback_days']} Trading Days** | "
+            f"Evaluated Last **{bt['lookback_days']} Trading Days (Strict 5-Min Candles)** | "
             f"Target 1: **+{bt['target_1_pct']}%** (Book {t1_b}%) | "
             f"Target 2: **+{bt['target_2_pct']}%** (Book {t2_b}%) | "
             f"Target 3: **+{bt.get('target_3_pct', 10.0)}%** (Runner {t3_b}%) | "

@@ -150,3 +150,49 @@ def test_intraday_ambiguity_proximity():
     # Since target was closer to Open, target was hit first
     assert "T1" in row_prox["Outcome"] or "Target 1" in row_prox["Outcome"]
 
+
+def test_5m_candles_pinpoint_entry_and_intraday_sequence():
+    # Day 0: 2026-03-02 (Signal day)
+    # Day 1: 2026-03-03 (Entry day with 5-minute candles)
+    # Bar 0 (09:15): Open 34.40, High 34.50, Low 34.30, Close 34.45 (Entry pinpoint at 34.40!)
+    # Bar 1 (09:20): Open 34.45, High 34.45, Low 33.60, Close 33.65 (Dips below SL -2% = 33.71!)
+    # Bar 10 (10:05): Later rallies to 36.00 (above Target 1) - But was already stopped out at 09:20!
+    times = [
+        "2026-03-02 09:15", "2026-03-02 15:25",
+        "2026-03-03 09:15", "2026-03-03 09:20", "2026-03-03 10:05"
+    ]
+    mock_idx = pd.to_datetime(times)
+    mock_df = pd.DataFrame(
+        {
+            ("Open", "GEEK.NS"):  [32.0, 33.0, 34.40, 34.45, 35.50],
+            ("High", "GEEK.NS"):  [32.5, 33.5, 34.50, 34.45, 36.00],
+            ("Low", "GEEK.NS"):   [31.8, 32.8, 34.30, 33.60, 35.40],
+            ("Close", "GEEK.NS"): [32.2, 33.4, 34.45, 33.65, 35.80],
+            ("Volume", "GEEK.NS"): [1000, 1000, 5000, 2000, 3000],
+            ("Open", "^NSEI"):  [22000.0] * 5,
+            ("High", "^NSEI"):  [22100.0] * 5,
+            ("Low", "^NSEI"):   [21900.0] * 5,
+            ("Close", "^NSEI"): [22050.0] * 5,
+            ("Volume", "^NSEI"): [5000] * 5,
+        },
+        index=mock_idx
+    )
+    mock_df.columns = pd.MultiIndex.from_tuples(mock_df.columns)
+    signals = {"2026-03-02": [{"symbol": "GEEK", "name": "Geek Corp"}]}
+
+    with patch("yfinance.download", return_value=mock_df):
+        trades_df, summary, _ = run_swing_backtest(
+            signals_by_date=signals,
+            target_1_pct=3.5,
+            sl_pct=2.0
+        )
+
+    assert not trades_df.empty
+    trade = trades_df.iloc[0]
+    # Pinpoint entry at exact 09:15 opening price 34.40
+    assert trade["Entry Price"] == 34.40
+    # Stopped out at 09:20 before later rally
+    assert "09:20" in trade["Outcome"]
+    assert "Stop Loss Hit" in trade["Outcome"]
+
+

@@ -404,42 +404,51 @@ def run_swing_backtest(
 
     yf_tickers = [s + ".NS" for s in all_symbols] + ["^NSEI"]
     try:
-        hist_data = yf.download(yf_tickers, period="3mo", progress=False)
+        hist_data = yf.download(
+            yf_tickers,
+            period="60d",
+            interval="5m",
+            auto_adjust=False,
+            progress=False
+        )
     except Exception:
         hist_data = pd.DataFrame()
 
     if hist_data.empty:
         return pd.DataFrame(), {}, pd.DataFrame()
 
-    # Extract Nifty 50 historical daily bars
+    # Extract Nifty 50 historical 5m bars into session open/close map
     nifty_map: Dict[str, Dict[str, float]] = {}
     if isinstance(hist_data.columns, pd.MultiIndex) and "^NSEI" in hist_data["Close"].columns:
-        n_open_s = hist_data["Open"]["^NSEI"].dropna()
-        n_close_s = hist_data["Close"]["^NSEI"].dropna()
-        for n_dt, o_val in n_open_s.items():
-            dt_str = n_dt.strftime("%Y-%m-%d")
-            c_val = n_close_s.get(n_dt, o_val)
-            chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
-            nifty_map[dt_str] = {
-                "open": round(float(o_val), 2),
-                "close": round(float(c_val), 2),
-                "chg_pct": round(float(chg), 2)
-            }
+        n_df = pd.DataFrame({
+            "Open": hist_data["Open"]["^NSEI"],
+            "Close": hist_data["Close"]["^NSEI"]
+        }).dropna()
+        for d_str, grp in n_df.groupby(n_df.index.strftime("%Y-%m-%d")):
+            if not grp.empty:
+                o_val = float(grp.iloc[0]["Open"])
+                c_val = float(grp.iloc[-1]["Close"])
+                chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
+                nifty_map[d_str] = {
+                    "open": round(o_val, 2),
+                    "close": round(c_val, 2),
+                    "chg_pct": round(chg, 2)
+                }
 
     if not nifty_map:
         try:
-            n_raw = yf.download("^NSEI", period="3mo", progress=False)
+            n_raw = yf.download("^NSEI", period="60d", interval="5m", auto_adjust=False, progress=False)
             if not n_raw.empty:
-                for n_dt, n_row in n_raw.iterrows():
-                    dt_str = n_dt.strftime("%Y-%m-%d")
-                    o_val = float(n_row["Open"])
-                    c_val = float(n_row["Close"])
-                    chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
-                    nifty_map[dt_str] = {
-                        "open": round(o_val, 2),
-                        "close": round(c_val, 2),
-                        "chg_pct": round(chg, 2)
-                    }
+                for d_str, grp in n_raw.groupby(n_raw.index.strftime("%Y-%m-%d")):
+                    if not grp.empty:
+                        o_val = float(grp.iloc[0]["Open"])
+                        c_val = float(grp.iloc[-1]["Close"])
+                        chg = ((c_val - o_val) / o_val * 100.0) if o_val > 0 else 0.0
+                        nifty_map[d_str] = {
+                            "open": round(o_val, 2),
+                            "close": round(c_val, 2),
+                            "chg_pct": round(chg, 2)
+                        }
         except Exception:
             pass
 
@@ -518,34 +527,49 @@ def simulate_swing_trades(
                             "Low": hist_data["Low"][ticker_ns],
                             "Close": hist_data["Close"][ticker_ns],
                             "Volume": hist_data["Volume"][ticker_ns]
-                        }).dropna()
+                        }).dropna(how="all")
                     else:
                         continue
                 else:
-                    s_df = hist_data.dropna()
+                    s_df = hist_data.dropna(how="all")
 
                 if s_df.empty:
                     continue
 
                 f_info = get_stock_fundamentals(sym)
-                vol_series_sig = s_df.loc[s_df.index <= sig_ts, "Volume"] if "Volume" in s_df.columns else pd.Series(dtype=float)
+
+                # Available trading dates for this stock
+                avail_dates = sorted(list(set(s_df.index.strftime("%Y-%m-%d"))))
+                prior_dates = [d for d in avail_dates if d <= sig_date]
+                dates_after = [d for d in avail_dates if d > sig_date]
+
+                # Compute volume expansion from prior days
+                day_vols = []
+                for d in prior_dates:
+                    day_bars_vol = s_df.loc[s_df.index.strftime("%Y-%m-%d") == d, "Volume"]
+                    day_vols.append(float(day_bars_vol.sum()))
+                vol_series_sig = pd.Series(day_vols, index=pd.to_datetime(prior_dates)) if day_vols else pd.Series(dtype=float)
                 vol_1w, vol_1m = compute_volume_growth_from_series(vol_series_sig)
 
-                dates_after = s_df.index[s_df.index > sig_ts]
-                if len(dates_after) == 0:
-                    prior_dates = s_df.index[s_df.index <= sig_ts]
-                    p_ret = 0.0
-                    if len(prior_dates) >= 2:
-                        p_close = float(s_df.loc[prior_dates[-2], "Close"])
-                        s_close = float(s_df.loc[prior_dates[-1], "Close"])
+                # Stock's previous day return (breakout/signal candle return relative to prior close)
+                prev_day_return_pct = 0.0
+                if len(prior_dates) >= 2:
+                    p_bars = s_df[s_df.index.strftime("%Y-%m-%d") == prior_dates[-2]]
+                    s_bars = s_df[s_df.index.strftime("%Y-%m-%d") == prior_dates[-1]]
+                    if not p_bars.empty and not s_bars.empty:
+                        p_close = float(p_bars.iloc[-1]["Close"])
+                        s_close = float(s_bars.iloc[-1]["Close"])
                         if p_close > 0:
-                            p_ret = round(((s_close - p_close) / p_close) * 100.0, 2)
-                    elif len(prior_dates) == 1:
-                        s_open = float(s_df.loc[prior_dates[-1], "Open"])
-                        s_close = float(s_df.loc[prior_dates[-1], "Close"])
+                            prev_day_return_pct = round(((s_close - p_close) / p_close) * 100.0, 2)
+                elif len(prior_dates) == 1:
+                    s_bars = s_df[s_df.index.strftime("%Y-%m-%d") == prior_dates[-1]]
+                    if not s_bars.empty:
+                        s_open = float(s_bars.iloc[0]["Open"])
+                        s_close = float(s_bars.iloc[-1]["Close"])
                         if s_open > 0:
-                            p_ret = round(((s_close - s_open) / s_open) * 100.0, 2)
+                            prev_day_return_pct = round(((s_close - s_open) / s_open) * 100.0, 2)
 
+                if len(dates_after) == 0:
                     trade_rows.append({
                         "Signal Date": sig_date,
                         "Entry Date": "Pending Next Session",
@@ -563,7 +587,7 @@ def simulate_swing_trades(
                         "ROE %": f_info.get("roe_pct", 0.0),
                         "Debt to Equity": f_info.get("debt_to_equity", 0.0),
                         "Operating Margin %": f_info.get("operating_margin_pct", 0.0),
-                        "Prev Day Return %": p_ret,
+                        "Prev Day Return %": prev_day_return_pct,
                         "Nifty Open": 0.0,
                         "Nifty Close": 0.0,
                         "Nifty Chg %": 0.0,
@@ -583,27 +607,16 @@ def simulate_swing_trades(
                     })
                     continue
 
-                d1_dt = dates_after[0]
-                entry_date_str = d1_dt.strftime("%Y-%m-%d")
-                d1_row = s_df.loc[d1_dt]
-                entry = float(d1_row["Open"])
-
-                if entry <= 0:
+                d1_date_str = dates_after[0]
+                entry_date_str = d1_date_str
+                d1_candles = s_df[s_df.index.strftime("%Y-%m-%d") == d1_date_str]
+                if d1_candles.empty:
                     continue
 
-                # Stock's previous day return (breakout day / signal day return relative to prior close)
-                prior_dates = s_df.index[s_df.index < d1_dt]
-                prev_day_return_pct = 0.0
-                if len(prior_dates) >= 2:
-                    p_close = float(s_df.loc[prior_dates[-2], "Close"])
-                    s_close = float(s_df.loc[prior_dates[-1], "Close"])
-                    if p_close > 0:
-                        prev_day_return_pct = round(((s_close - p_close) / p_close) * 100.0, 2)
-                elif len(prior_dates) == 1:
-                    s_open = float(s_df.loc[prior_dates[-1], "Open"])
-                    s_close = float(s_df.loc[prior_dates[-1], "Close"])
-                    if s_open > 0:
-                        prev_day_return_pct = round(((s_close - s_open) / s_open) * 100.0, 2)
+                # Pinpoint 9:15 AM Open on Day T+1
+                entry = float(d1_candles.iloc[0]["Open"])
+                if entry <= 0:
+                    continue
 
                 t1_price = entry * (1.0 + target_1_pct / 100.0)
                 t2_price = entry * (1.0 + target_2_pct / 100.0)
@@ -624,18 +637,31 @@ def simulate_swing_trades(
                 active_weight = 1.0
 
                 days_to_simulate = min(max_holding_days, len(dates_after))
+                eval_holding_days = dates_after[:days_to_simulate]
+                day_index_map = {d: idx + 1 for idx, d in enumerate(eval_holding_days)}
+                trade_candles = s_df[s_df.index.strftime("%Y-%m-%d").isin(eval_holding_days)]
+
                 final_close = entry
+                final_day = 1
+                final_time = ""
 
-                for day_idx in range(days_to_simulate):
-                    cur_dt = dates_after[day_idx]
-                    cur_row = s_df.loc[cur_dt]
-                    cur_day = day_idx + 1
+                # Evaluate every 5-minute candle in strict chronological order
+                for bar_dt, bar_row in trade_candles.iterrows():
+                    cur_date_str = bar_dt.strftime("%Y-%m-%d")
+                    cur_day = day_index_map.get(cur_date_str, 1)
+                    cur_time = bar_dt.strftime("%H:%M")
+                    time_suffix = f" ({cur_time})" if cur_time != "00:00" else ""
 
-                    d_open = float(cur_row["Open"])
-                    d_high = float(cur_row["High"])
-                    d_low = float(cur_row["Low"])
-                    d_close = float(cur_row["Close"])
-                    final_close = d_close
+                    b_open = float(bar_row["Open"])
+                    b_high = float(bar_row["High"])
+                    b_low = float(bar_row["Low"])
+                    b_close = float(bar_row["Close"])
+                    final_close = b_close
+                    final_day = cur_day
+                    final_time = cur_time
+
+                    if b_high > peak_high:
+                        peak_high = b_high
 
                     eff_sl = current_sl if enable_trailing_sl else initial_sl_price
 
@@ -648,25 +674,23 @@ def simulate_swing_trades(
                     elif not t3_hit:
                         next_target = t3_price
 
-                    sl_breached = (d_low <= eff_sl)
-                    target_breached = (next_target is not None and d_high >= next_target)
+                    sl_breached = (b_low <= eff_sl)
+                    target_breached = (next_target is not None and b_high >= next_target)
 
-                    # Determine if Stop Loss hit before Target on conflict days
+                    # Determine if Stop Loss hit before Target on conflict bars
                     sl_first = False
                     if sl_breached and target_breached:
-                        if d_open <= eff_sl:
-                            # Opened at/below SL: breached before any intraday rally
+                        if b_open <= eff_sl:
                             sl_first = True
-                        elif d_open >= next_target:
-                            # Opened at/above Target: target hit at open before intraday dip
+                        elif b_open >= next_target:
                             sl_first = False
                         elif "Conservative" in intraday_ambiguity or intraday_ambiguity == "SL First":
                             sl_first = True
                         elif "Optimistic" in intraday_ambiguity or intraday_ambiguity == "Target First":
                             sl_first = False
                         elif "Proximity" in intraday_ambiguity:
-                            dist_to_sl = abs(d_open - eff_sl)
-                            dist_to_target = abs(next_target - d_open)
+                            dist_to_sl = abs(b_open - eff_sl)
+                            dist_to_target = abs(next_target - b_open)
                             sl_first = (dist_to_sl <= dist_to_target)
                         else:
                             sl_first = True
@@ -675,29 +699,25 @@ def simulate_swing_trades(
 
                     if sl_first:
                         hold_days = cur_day
-                        exit_price = round(d_open if d_open < eff_sl else eff_sl, 2)
+                        exit_price = round(b_open if b_open < eff_sl else eff_sl, 2)
                         rem_ret = ((exit_price - entry) / entry) * 100.0
                         booked_return += active_weight * rem_ret
                         active_weight = 0.0
                         realized_ret = booked_return
 
                         if t2_hit:
-                            outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day})"
+                            outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day}{time_suffix})"
                         elif t1_hit:
                             if eff_sl >= entry:
-                                outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day})"
+                                outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day}{time_suffix})"
                             else:
-                                outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day})"
+                                outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day}{time_suffix})"
                         else:
-                            outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
+                            outcome = f"🛑 Stop Loss Hit (Day {cur_day}{time_suffix})"
                         break
 
-                    # Target evaluation (when Target assumed first or only Target breached)
-                    if d_high > peak_high:
-                        peak_high = d_high
-
-                    # Check Target 1 hit
-                    if not t1_hit and d_high >= t1_price:
+                    # Target evaluation
+                    if not t1_hit and b_high >= t1_price:
                         t1_hit = True
                         if w1 > 0:
                             booked_return += w1 * target_1_pct
@@ -705,17 +725,15 @@ def simulate_swing_trades(
                         if enable_trailing_sl and trail_trigger == "After Target 1":
                             current_sl = max(current_sl, entry)  # Move SL to Breakeven
 
-                    # Check Target 2 hit
-                    if t1_hit and not t2_hit and d_high >= t2_price:
+                    if t1_hit and not t2_hit and b_high >= t2_price:
                         t2_hit = True
                         if w2 > 0 and active_weight > 0:
                             booked_return += w2 * target_2_pct
                             active_weight = max(0.0, active_weight - w2)
                         if enable_trailing_sl:
-                            current_sl = max(current_sl, t1_price)  # Ratchet SL to Target 1 price
+                            current_sl = max(current_sl, t1_price)
 
-                    # Check Target 3 hit
-                    if (t2_hit or d_high >= t3_price) and not t3_hit and d_high >= t3_price:
+                    if (t2_hit or b_high >= t3_price) and not t3_hit and b_high >= t3_price:
                         t3_hit = True
                         if active_weight > 0:
                             booked_return += active_weight * target_3_pct
@@ -723,22 +741,20 @@ def simulate_swing_trades(
                         hold_days = cur_day
                         exit_price = round(t3_price, 2)
                         realized_ret = booked_return
-                        outcome = f"🚀 Target 3 Hit (Day {cur_day})"
+                        outcome = f"🚀 Target 3 Hit (Day {cur_day}{time_suffix})"
                         break
 
-                    # Check if all position has been booked (e.g. w1 + w2 == 100% and T2 hit)
                     if active_weight <= 0:
                         hold_days = cur_day
                         realized_ret = booked_return
                         if t2_hit:
                             exit_price = round(t2_price, 2)
-                            outcome = f"🚀 Target 2 Hit ({t1_book_pct:.0f}% T1 + {t2_book_pct:.0f}% T2) (Day {cur_day})"
+                            outcome = f"🚀 Target 2 Hit ({t1_book_pct:.0f}% T1 + {t2_book_pct:.0f}% T2) (Day {cur_day}{time_suffix})"
                         elif t1_hit:
                             exit_price = round(t1_price, 2)
-                            outcome = f"🎯 Target 1 Hit (Day {cur_day})"
+                            outcome = f"🎯 Target 1 Hit (Day {cur_day}{time_suffix})"
                         break
 
-                    # Update trailing SL if enabled
                     if enable_trailing_sl:
                         if trail_trigger == "After Target 1":
                             if t1_hit:
@@ -748,9 +764,8 @@ def simulate_swing_trades(
                             trail_candidate = peak_high * (1.0 - trailing_sl_pct / 100.0)
                             current_sl = max(current_sl, trail_candidate)
 
-                    # Check Stop Loss / Trailing Stop Loss on remaining weight
                     eff_sl_after = current_sl if enable_trailing_sl else initial_sl_price
-                    if d_low <= eff_sl_after and active_weight > 0:
+                    if b_low <= eff_sl_after and active_weight > 0:
                         hold_days = cur_day
                         exit_price = round(eff_sl_after, 2)
                         rem_ret = ((eff_sl_after - entry) / entry) * 100.0
@@ -759,32 +774,33 @@ def simulate_swing_trades(
                         realized_ret = booked_return
 
                         if t2_hit:
-                            outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day})"
+                            outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day}{time_suffix})"
                         elif t1_hit:
                             if eff_sl_after >= entry:
-                                outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day})"
+                                outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day}{time_suffix})"
                             else:
-                                outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day})"
+                                outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day}{time_suffix})"
                         else:
-                            outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
+                            outcome = f"🛑 Stop Loss Hit (Day {cur_day}{time_suffix})"
                         break
 
-                # If holding period expires (Day Close exit)
+                # If holding period expires (Day Close exit on last candle)
                 if not outcome:
-                    hold_days = days_to_simulate
+                    hold_days = final_day
                     exit_price = round(final_close, 2)
                     if active_weight > 0:
                         close_ret = ((final_close - entry) / entry) * 100.0
                         booked_return += active_weight * close_ret
                         active_weight = 0.0
                     realized_ret = booked_return
+                    close_time_suffix = f" ({final_time})" if final_time and final_time != "00:00" else ""
 
                     if t2_hit:
-                        outcome = f"🚀 T1 & T2 Booked + Exited Day {hold_days} Close"
+                        outcome = f"🚀 T1 & T2 Booked + Exited Day {hold_days} Close{close_time_suffix}"
                     elif t1_hit:
-                        outcome = f"🎯 Target 1 Booked ({t1_book_pct:.0f}%) + Exited Day {hold_days} Close"
+                        outcome = f"🎯 Target 1 Booked ({t1_book_pct:.0f}%) + Exited Day {hold_days} Close{close_time_suffix}"
                     else:
-                        outcome = f"⏱️ Exited at Day {hold_days} Close"
+                        outcome = f"⏱️ Exited Day {hold_days} Close{close_time_suffix}"
 
                 peak_gain_pct = ((peak_high - entry) / entry) * 100.0
 
