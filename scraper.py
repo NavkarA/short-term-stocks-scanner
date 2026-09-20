@@ -514,12 +514,26 @@ def simulate_swing_trades(
 
                 dates_after = s_df.index[s_df.index > sig_ts]
                 if len(dates_after) == 0:
+                    prior_dates = s_df.index[s_df.index <= sig_ts]
+                    p_ret = 0.0
+                    if len(prior_dates) >= 2:
+                        p_close = float(s_df.loc[prior_dates[-2], "Close"])
+                        s_close = float(s_df.loc[prior_dates[-1], "Close"])
+                        if p_close > 0:
+                            p_ret = round(((s_close - p_close) / p_close) * 100.0, 2)
+                    elif len(prior_dates) == 1:
+                        s_open = float(s_df.loc[prior_dates[-1], "Open"])
+                        s_close = float(s_df.loc[prior_dates[-1], "Close"])
+                        if s_open > 0:
+                            p_ret = round(((s_close - s_open) / s_open) * 100.0, 2)
+
                     trade_rows.append({
                         "Signal Date": sig_date,
                         "Entry Date": "Pending Next Session",
                         "Symbol": sym,
                         "Market Cap": mcap,
                         "Sector": sector,
+                        "Prev Day Return %": p_ret,
                         "Nifty Open": 0.0,
                         "Nifty Close": 0.0,
                         "Nifty Chg %": 0.0,
@@ -546,6 +560,20 @@ def simulate_swing_trades(
 
                 if entry <= 0:
                     continue
+
+                # Stock's previous day return (breakout day / signal day return relative to prior close)
+                prior_dates = s_df.index[s_df.index < d1_dt]
+                prev_day_return_pct = 0.0
+                if len(prior_dates) >= 2:
+                    p_close = float(s_df.loc[prior_dates[-2], "Close"])
+                    s_close = float(s_df.loc[prior_dates[-1], "Close"])
+                    if p_close > 0:
+                        prev_day_return_pct = round(((s_close - p_close) / p_close) * 100.0, 2)
+                elif len(prior_dates) == 1:
+                    s_open = float(s_df.loc[prior_dates[-1], "Open"])
+                    s_close = float(s_df.loc[prior_dates[-1], "Close"])
+                    if s_open > 0:
+                        prev_day_return_pct = round(((s_close - s_open) / s_open) * 100.0, 2)
 
                 t1_price = entry * (1.0 + target_1_pct / 100.0)
                 t2_price = entry * (1.0 + target_2_pct / 100.0)
@@ -685,6 +713,7 @@ def simulate_swing_trades(
                     "Symbol": sym,
                     "Market Cap": mcap,
                     "Sector": sector,
+                    "Prev Day Return %": prev_day_return_pct,
                     "Nifty Open": n_open,
                     "Nifty Close": n_close,
                     "Nifty Chg %": n_chg,

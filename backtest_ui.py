@@ -583,6 +583,7 @@ def render_backtest_dashboard():
         "Entry Date",
         "Symbol",
         "TradingView",
+        "Prev Day Return %",
         "Entry Price",
         "Target 1 Price",
         "Target 2 Price",
@@ -603,6 +604,7 @@ def render_backtest_dashboard():
         view_df[present_cols],
         column_config={
             "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart"),
+            "Prev Day Return %": st.column_config.NumberColumn("Prev Day Return %", format="%+.2f%%"),
             "Entry Price": st.column_config.NumberColumn("Entry (₹)", format="₹%.2f"),
             "Target 1 Price": st.column_config.NumberColumn("T1 Price (₹)", format="₹%.2f"),
             "Target 2 Price": st.column_config.NumberColumn("T2 Price (₹)", format="₹%.2f"),

@@ -58,5 +58,6 @@ def test_run_swing_backtest_3_tier_targets_and_weights():
     assert row["Target 1 Price"] == 103.0
     assert row["Target 2 Price"] == 106.0
     assert row["Target 3 Price"] == 110.0
+    assert "Prev Day Return %" in row
     assert "Target 3 Hits" in date_summary.columns
     assert "t3_hit_count" in summary
