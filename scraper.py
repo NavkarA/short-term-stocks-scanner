@@ -349,6 +349,7 @@ def run_swing_backtest(
     signals_by_date: Dict[str, List[Dict[str, str]]],
     target_1_pct: float = 3.5,
     target_2_pct: float = 6.0,
+    target_3_pct: float = 10.0,
     sl_pct: float = 2.0,
     max_holding_days: int = 3,
     num_days: int = 7,
@@ -356,13 +357,15 @@ def run_swing_backtest(
     trailing_sl_pct: float = 2.0,
     trail_trigger: str = "After Target 1",
     t1_book_pct: float = 50.0,
+    t2_book_pct: float = 30.0,
     progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any], pd.DataFrame]:
     """
     Backtests a swing strategy using historical scanner signals.
-    Buys at Day T+1 Open, evaluates Target 1, Target 2, Stop Loss, Trailing Stop Loss,
-    or Close Exit across 1 to 10 holding days. Supports partial quantity booking on Target 1
-    and records Nifty 50 Open/Close for each trade.
+    Buys at Day T+1 Open, evaluates Target 1, Target 2, Target 3, Stop Loss,
+    Trailing Stop Loss, or Close Exit across 1 to 10 holding days.
+    Supports partial quantity booking on Target 1 and Target 2, and records
+    Nifty 50 Open/Close for each trade session.
 
     Returns:
         (trades_df, summary_metrics, date_summary_df)
@@ -430,9 +433,10 @@ def run_swing_backtest(
     if progress_callback:
         progress_callback(0.6, "Simulating trades and evaluating Target & Stop Loss hits...")
 
-    # Partial quantity weights
+    # Multi-tier partial quantity weights
     w1 = min(max(float(t1_book_pct) / 100.0, 0.0), 1.0)
-    w2 = 1.0 - w1
+    w2 = min(max(float(t2_book_pct) / 100.0, 0.0), 1.0 - w1)
+    w3 = max(1.0 - w1 - w2, 0.0)
 
     trade_rows: List[Dict[str, Any]] = []
 
@@ -479,6 +483,7 @@ def run_swing_backtest(
                         "Entry Price": 0.0,
                         "Target 1 Price": 0.0,
                         "Target 2 Price": 0.0,
+                        "Target 3 Price": 0.0,
                         "Initial SL Price": 0.0,
                         "Final SL Price": 0.0,
                         "Peak High": 0.0,
@@ -501,15 +506,21 @@ def run_swing_backtest(
 
                 t1_price = entry * (1.0 + target_1_pct / 100.0)
                 t2_price = entry * (1.0 + target_2_pct / 100.0)
+                t3_price = entry * (1.0 + target_3_pct / 100.0)
                 initial_sl_price = entry * (1.0 - sl_pct / 100.0)
                 current_sl = initial_sl_price
 
                 peak_high = entry
                 t1_hit = False
+                t2_hit = False
+                t3_hit = False
                 outcome = ""
                 realized_ret = 0.0
                 exit_price = 0.0
                 hold_days = 0
+
+                booked_return = 0.0
+                active_weight = 1.0
 
                 days_to_simulate = min(max_holding_days, len(dates_after))
                 final_close = entry
@@ -527,87 +538,94 @@ def run_swing_backtest(
                     if d_high > peak_high:
                         peak_high = d_high
 
-                    # Check if Target 1 is reached today
-                    hit_t1_today = (d_high >= t1_price)
-                    if hit_t1_today and not t1_hit:
+                    # Check Target 1 hit
+                    if not t1_hit and d_high >= t1_price:
                         t1_hit = True
+                        if w1 > 0:
+                            booked_return += w1 * target_1_pct
+                            active_weight = max(0.0, active_weight - w1)
+                        if enable_trailing_sl and trail_trigger == "After Target 1":
+                            current_sl = max(current_sl, entry)  # Move SL to Breakeven
 
-                    # Update trailing stop loss level
+                    # Check Target 2 hit
+                    if t1_hit and not t2_hit and d_high >= t2_price:
+                        t2_hit = True
+                        if w2 > 0 and active_weight > 0:
+                            booked_return += w2 * target_2_pct
+                            active_weight = max(0.0, active_weight - w2)
+                        if enable_trailing_sl:
+                            current_sl = max(current_sl, t1_price)  # Ratchet SL to Target 1 price
+
+                    # Check Target 3 hit
+                    if (t2_hit or d_high >= t3_price) and not t3_hit and d_high >= t3_price:
+                        t3_hit = True
+                        if active_weight > 0:
+                            booked_return += active_weight * target_3_pct
+                            active_weight = 0.0
+                        hold_days = cur_day
+                        exit_price = round(t3_price, 2)
+                        realized_ret = booked_return
+                        outcome = f"🚀 Target 3 Hit (Day {cur_day})"
+                        break
+
+                    # Check if all position has been booked (e.g. w1 + w2 == 100% and T2 hit)
+                    if active_weight <= 0:
+                        hold_days = cur_day
+                        realized_ret = booked_return
+                        if t2_hit:
+                            exit_price = round(t2_price, 2)
+                            outcome = f"🚀 Target 2 Hit ({t1_book_pct:.0f}% T1 + {t2_book_pct:.0f}% T2) (Day {cur_day})"
+                        elif t1_hit:
+                            exit_price = round(t1_price, 2)
+                            outcome = f"🎯 Target 1 Hit (Day {cur_day})"
+                        break
+
+                    # Update trailing SL if enabled
                     if enable_trailing_sl:
                         if trail_trigger == "After Target 1":
                             if t1_hit:
-                                current_sl = max(current_sl, entry)  # Move to Breakeven
                                 trail_candidate = peak_high * (1.0 - trailing_sl_pct / 100.0)
                                 current_sl = max(current_sl, trail_candidate)
                         else:  # "From Entry"
                             trail_candidate = peak_high * (1.0 - trailing_sl_pct / 100.0)
                             current_sl = max(current_sl, trail_candidate)
 
-                    # Check exit triggers
-                    # Scenario 1: 100% booked at Target 1 (Full Exit on T1)
-                    if w1 >= 1.0:
-                        if d_low <= initial_sl_price:
+                    # Check Stop Loss / Trailing Stop Loss
+                    eff_sl = current_sl if enable_trailing_sl else initial_sl_price
+                    if d_low <= eff_sl:
+                        hold_days = cur_day
+                        exit_price = round(eff_sl, 2)
+                        rem_ret = ((eff_sl - entry) / entry) * 100.0
+                        booked_return += active_weight * rem_ret
+                        active_weight = 0.0
+                        realized_ret = booked_return
+
+                        if t2_hit:
+                            outcome = f"🎯 T1 & T2 Booked + Trailing SL Hit (Day {cur_day})"
+                        elif t1_hit:
+                            if eff_sl >= entry:
+                                outcome = f"🛡️ Trailing SL Hit (T1 Booked) (Day {cur_day})"
+                            else:
+                                outcome = f"🛑 SL Hit on Remainder (T1 Booked) (Day {cur_day})"
+                        else:
                             outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
-                            realized_ret = -sl_pct
-                            exit_price = round(initial_sl_price, 2)
-                            hold_days = cur_day
-                            break
-                        elif d_high >= t2_price:
-                            outcome = f"🚀 Target 2 Hit (Day {cur_day})"
-                            realized_ret = target_2_pct
-                            exit_price = round(t2_price, 2)
-                            hold_days = cur_day
-                            break
-                        elif d_high >= t1_price:
-                            outcome = f"🎯 Target 1 Hit (Day {cur_day})"
-                            realized_ret = target_1_pct
-                            exit_price = round(t1_price, 2)
-                            hold_days = cur_day
-                            break
-                    else:
-                        # Scenario 2: Partial Booking Mode (w1% at T1, w2% rides to T2/Trailing SL)
-                        # Check Target 2 first
-                        if d_high >= t2_price:
-                            hold_days = cur_day
-                            exit_price = round(t2_price, 2)
-                            if t1_hit:
-                                realized_ret = (w1 * target_1_pct) + (w2 * target_2_pct)
-                                outcome = f"🚀 Target 2 Hit ({t1_book_pct:.0f}% T1 + {100-t1_book_pct:.0f}% T2) (Day {cur_day})"
-                            else:
-                                realized_ret = target_2_pct
-                                outcome = f"🚀 Target 2 Hit (Day {cur_day})"
-                            break
+                        break
 
-                        # Check Stop Loss or Trailing Stop Loss
-                        eff_sl = current_sl if enable_trailing_sl else initial_sl_price
-                        if d_low <= eff_sl:
-                            hold_days = cur_day
-                            exit_price = round(eff_sl, 2)
-                            if t1_hit:
-                                rem_ret = ((eff_sl - entry) / entry) * 100.0
-                                realized_ret = (w1 * target_1_pct) + (w2 * rem_ret)
-                                if eff_sl >= entry:
-                                    outcome = f"🛡️ Trailing SL Hit ({t1_book_pct:.0f}% at T1) (Day {cur_day})"
-                                else:
-                                    outcome = f"🛑 SL Hit on Remainder ({t1_book_pct:.0f}% at T1) (Day {cur_day})"
-                            else:
-                                realized_ret = -sl_pct
-                                outcome = f"🛑 Stop Loss Hit (Day {cur_day})"
-                            break
-
-                # If no trigger hit during evaluated days, exit at final available Close
+                # If holding period expires (Day Close exit)
                 if not outcome:
                     hold_days = days_to_simulate
                     exit_price = round(final_close, 2)
-                    if t1_hit and w1 < 1.0:
-                        rem_ret = ((final_close - entry) / entry) * 100.0
-                        realized_ret = (w1 * target_1_pct) + (w2 * rem_ret)
-                        outcome = f"🎯 Target 1 Booked ({t1_book_pct:.0f}%) + Exited Day {hold_days} Close"
+                    if active_weight > 0:
+                        close_ret = ((final_close - entry) / entry) * 100.0
+                        booked_return += active_weight * close_ret
+                        active_weight = 0.0
+                    realized_ret = booked_return
+
+                    if t2_hit:
+                        outcome = f"🚀 T1 & T2 Booked + Exited Day {hold_days} Close"
                     elif t1_hit:
-                        realized_ret = target_1_pct
-                        outcome = f"🎯 Target 1 Achieved (Exited Day {hold_days} Close)"
+                        outcome = f"🎯 Target 1 Booked ({t1_book_pct:.0f}%) + Exited Day {hold_days} Close"
                     else:
-                        realized_ret = ((final_close - entry) / entry) * 100.0
                         outcome = f"⏱️ Exited at Day {hold_days} Close"
 
                 peak_gain_pct = ((peak_high - entry) / entry) * 100.0
@@ -630,6 +648,7 @@ def run_swing_backtest(
                     "Entry Price": round(entry, 2),
                     "Target 1 Price": round(t1_price, 2),
                     "Target 2 Price": round(t2_price, 2),
+                    "Target 3 Price": round(t3_price, 2),
                     "Initial SL Price": round(initial_sl_price, 2),
                     "Final SL Price": round(current_sl, 2),
                     "Peak High": round(peak_high, 2),
@@ -656,8 +675,9 @@ def run_swing_backtest(
     tot_completed = len(completed)
 
     if tot_completed > 0:
-        t1_hits = len(completed[completed["Outcome"].str.contains("Target 1")])
-        t2_hits = len(completed[completed["Outcome"].str.contains("Target 2")])
+        t1_hits = len(completed[completed["Outcome"].str.contains("Target 1") | completed["Outcome"].str.contains("T1")])
+        t2_hits = len(completed[completed["Outcome"].str.contains("Target 2") | completed["Outcome"].str.contains("T2")])
+        t3_hits = len(completed[completed["Outcome"].str.contains("Target 3")])
         trail_sl_hits = len(completed[completed["Outcome"].str.contains("Trailing SL")])
         sl_hits = len(completed[completed["Outcome"].str.contains("Stop Loss")])
         close_exits = len(completed[completed["Outcome"].str.contains("Exited")])
@@ -687,6 +707,8 @@ def run_swing_backtest(
             "t1_hit_rate_pct": round((t1_hits / tot_completed) * 100.0, 1),
             "t2_hit_count": t2_hits,
             "t2_hit_rate_pct": round((t2_hits / tot_completed) * 100.0, 1),
+            "t3_hit_count": t3_hits,
+            "t3_hit_rate_pct": round((t3_hits / tot_completed) * 100.0, 1),
             "trail_sl_hit_count": trail_sl_hits,
             "trail_sl_hit_rate_pct": round((trail_sl_hits / tot_completed) * 100.0, 1),
             "sl_hit_count": sl_hits,
@@ -704,8 +726,9 @@ def run_swing_backtest(
         date_summary_list = []
         for s_date, grp in date_groups:
             c_tot = len(grp)
-            c_t1 = len(grp[grp["Outcome"].str.contains("Target 1")])
-            c_t2 = len(grp[grp["Outcome"].str.contains("Target 2")])
+            c_t1 = len(grp[grp["Outcome"].str.contains("Target 1") | grp["Outcome"].str.contains("T1")])
+            c_t2 = len(grp[grp["Outcome"].str.contains("Target 2") | grp["Outcome"].str.contains("T2")])
+            c_t3 = len(grp[grp["Outcome"].str.contains("Target 3")])
             c_trail_sl = len(grp[grp["Outcome"].str.contains("Trailing SL")])
             c_sl = len(grp[grp["Outcome"].str.contains("Stop Loss")])
             c_win = len(grp[grp["Realized Return %"] > 0])
@@ -730,6 +753,7 @@ def run_swing_backtest(
                 "Signals Count": c_tot,
                 "Target 1 Hits": c_t1,
                 "Target 2 Hits": c_t2,
+                "Target 3 Hits": c_t3,
                 "Trailing SL Hits": c_trail_sl,
                 "Stop Loss Hits": c_sl,
                 "Win Rate %": round(c_wr, 1),

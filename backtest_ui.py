@@ -116,24 +116,48 @@ def render_backtest_dashboard():
                 key="bt_target_1"
             )
 
-            target_2_pct = st.slider(
-                "Target 2 Gain (%) - Adjustable",
-                min_value=2.0,
-                max_value=20.0,
-                value=6.0,
-                step=0.5,
-                help="Extended breakout target for high-momentum runners (Adjustable).",
-                key="bt_target_2"
-            )
-
             t1_book_pct = st.slider(
                 "Target 1 Booking Quantity (%)",
                 min_value=10,
                 max_value=100,
                 value=50,
                 step=5,
-                help="Portion of quantity to book on hitting Target 1 (remainder rides to Target 2 / Trailing SL). Default: 50%.",
+                help="Portion of total position to book upon hitting Target 1 (default: 50%).",
                 key="bt_t1_book_pct"
+            )
+
+            target_2_pct = st.slider(
+                "Target 2 Gain (%) - Adjustable",
+                min_value=2.0,
+                max_value=20.0,
+                value=6.0,
+                step=0.5,
+                help="Second profit target for runners (Adjustable).",
+                key="bt_target_2"
+            )
+
+            max_t2_book = max(0, 100 - t1_book_pct)
+            t2_book_pct = st.slider(
+                "Target 2 Booking Quantity (%)",
+                min_value=0,
+                max_value=max(0, max_t2_book),
+                value=min(30, max_t2_book),
+                step=5,
+                help="Portion of total position to book on hitting Target 2. Remainder rides to Target 3.",
+                key="bt_t2_book_pct"
+            )
+
+            rem_t3 = max(0, 100 - t1_book_pct - t2_book_pct)
+            st.caption(f"Allocations: T1: **{t1_book_pct}%** | T2: **{t2_book_pct}%** | Remainder for T3 / Runner: **{rem_t3}%**")
+
+            target_3_pct = st.slider(
+                "Target 3 Gain (%)",
+                min_value=3.0,
+                max_value=30.0,
+                value=10.0,
+                step=0.5,
+                help="Third extended target for strong multi-day momentum swings.",
+                key="bt_target_3"
             )
 
             sl_pct = st.slider(
@@ -194,7 +218,7 @@ def render_backtest_dashboard():
         with btn_col2:
             st.caption(
                 f"Rule: Buy at Open of Day $T+1$. Holds for up to **{max_holding_days} day(s)**. "
-                f"Targets: +{target_1_pct}% / +{target_2_pct}%. Stop Loss: -{sl_pct}%"
+                f"Targets: +{target_1_pct}% / +{target_2_pct}% / +{target_3_pct}%. Stop Loss: -{sl_pct}%"
                 f"{f' with {trailing_sl_pct}% Trailing SL' if enable_trailing_sl else ''}."
             )
 
@@ -235,6 +259,7 @@ def render_backtest_dashboard():
                 signals_by_date=signals_by_date,
                 target_1_pct=target_1_pct,
                 target_2_pct=target_2_pct,
+                target_3_pct=target_3_pct,
                 sl_pct=sl_pct,
                 max_holding_days=max_holding_days,
                 num_days=lookback_days,
@@ -242,6 +267,7 @@ def render_backtest_dashboard():
                 trailing_sl_pct=trailing_sl_pct,
                 trail_trigger=trail_trigger_val,
                 t1_book_pct=t1_book_pct,
+                t2_book_pct=t2_book_pct,
                 progress_callback=update_progress
             )
 
@@ -257,6 +283,7 @@ def render_backtest_dashboard():
                 "scanner_name": chosen_scanner,
                 "target_1_pct": target_1_pct,
                 "target_2_pct": target_2_pct,
+                "target_3_pct": target_3_pct,
                 "sl_pct": sl_pct,
                 "max_holding_days": max_holding_days,
                 "lookback_days": lookback_days,
@@ -264,6 +291,7 @@ def render_backtest_dashboard():
                 "trailing_sl_pct": trailing_sl_pct,
                 "trail_mechanism": trail_mechanism,
                 "t1_book_pct": t1_book_pct,
+                "t2_book_pct": t2_book_pct,
                 "run_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             st.rerun()
@@ -292,10 +320,14 @@ def render_backtest_dashboard():
     with header_col1:
         st.subheader(f"📊 Backtest Results: {bt['scanner_name']}")
         tsl_label = f"🛡️ Trailing SL: {bt['trailing_sl_pct']}% ({bt['trail_mechanism']})" if bt.get("enable_trailing_sl") else "Fixed SL (No Trailing)"
-        t1_book_info = f" (Book {bt.get('t1_book_pct', 50)}%)" if bt.get("t1_book_pct", 50) < 100 else " (100% Exit)"
+        t1_b = bt.get("t1_book_pct", 50)
+        t2_b = bt.get("t2_book_pct", 30)
+        t3_b = max(0, 100 - t1_b - t2_b)
         st.caption(
             f"Evaluated Last **{bt['lookback_days']} Trading Days** | "
-            f"Target 1: **+{bt['target_1_pct']}%**{t1_book_info} | Target 2: **+{bt['target_2_pct']}%** | "
+            f"Target 1: **+{bt['target_1_pct']}%** (Book {t1_b}%) | "
+            f"Target 2: **+{bt['target_2_pct']}%** (Book {t2_b}%) | "
+            f"Target 3: **+{bt.get('target_3_pct', 10.0)}%** (Runner {t3_b}%) | "
             f"Stop Loss: **-{bt['sl_pct']}%** | Holding Horizon: **Up to {bt['max_holding_days']} Day(s)** | "
             f"{tsl_label} | Run at: `{bt['run_time']}`"
         )
@@ -313,7 +345,7 @@ def render_backtest_dashboard():
     # ----------------------------------------------------
     # 1. SUMMARY KPI METRIC CARDS
     # ----------------------------------------------------
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1, m2, m3, m4, m5, m6, m7 = st.columns(7)
 
     with m1:
         st.metric(
@@ -343,6 +375,13 @@ def render_backtest_dashboard():
             f"{summary.get('t2_hit_count', 0)} Hit"
         )
     with m5:
+        t3_rate = summary.get("t3_hit_rate_pct", 0.0)
+        st.metric(
+            f"Target 3 (+{bt.get('target_3_pct', 10.0)}%)",
+            f"{t3_rate:.1f}%",
+            f"{summary.get('t3_hit_count', 0)} Hit"
+        )
+    with m6:
         if bt.get("enable_trailing_sl"):
             trail_rate = summary.get("trail_sl_hit_rate_pct", 0.0)
             sl_rate = summary.get("sl_hit_rate_pct", 0.0)
@@ -359,7 +398,7 @@ def render_backtest_dashboard():
                 f"{summary.get('sl_hit_count', 0)} Hit",
                 delta_color="inverse"
             )
-    with m6:
+    with m7:
         avg_ret = summary.get("avg_return_pct", 0.0)
         pf = summary.get("profit_factor", 1.0)
         st.metric(
@@ -382,7 +421,9 @@ def render_backtest_dashboard():
 
         # Color mapping helper
         def get_outcome_color(label: str) -> str:
-            if "Target 2" in label:
+            if "Target 3" in label:
+                return "#76FF03"  # Lime Green
+            elif "Target 2" in label:
                 return "#00C853"  # Vibrant Green
             elif "Target 1" in label:
                 return "#00B0FF"  # Bright Blue
@@ -419,6 +460,13 @@ def render_backtest_dashboard():
         st.markdown("##### 📅 Daily Performance (Signals per Date)")
         if not date_summary_df.empty:
             fig_bar = go.Figure()
+            if "Target 3 Hits" in date_summary_df.columns and date_summary_df["Target 3 Hits"].sum() > 0:
+                fig_bar.add_trace(go.Bar(
+                    x=date_summary_df["Signal Date"],
+                    y=date_summary_df["Target 3 Hits"],
+                    name=f"Target 3 (+{bt.get('target_3_pct', 10.0)}%)",
+                    marker_color="#76FF03"
+                ))
             fig_bar.add_trace(go.Bar(
                 x=date_summary_df["Signal Date"],
                 y=date_summary_df["Target 2 Hits"],
@@ -473,6 +521,7 @@ def render_backtest_dashboard():
             "Signals Count": st.column_config.NumberColumn("Stocks Count", format="%d"),
             "Target 1 Hits": st.column_config.NumberColumn("Target 1 Hits 🎯", format="%d"),
             "Target 2 Hits": st.column_config.NumberColumn("Target 2 Hits 🚀", format="%d"),
+            "Target 3 Hits": st.column_config.NumberColumn("Target 3 Hits 🏆", format="%d"),
             "Stop Loss Hits": st.column_config.NumberColumn("Stop Loss Hits 🛑", format="%d"),
             "Win Rate %": st.column_config.ProgressColumn(
                 "Win Rate %",
@@ -537,6 +586,7 @@ def render_backtest_dashboard():
         "Entry Price",
         "Target 1 Price",
         "Target 2 Price",
+        "Target 3 Price",
         "Initial SL Price",
         "Final SL Price",
         "Peak High",
@@ -556,6 +606,7 @@ def render_backtest_dashboard():
             "Entry Price": st.column_config.NumberColumn("Entry (₹)", format="₹%.2f"),
             "Target 1 Price": st.column_config.NumberColumn("T1 Price (₹)", format="₹%.2f"),
             "Target 2 Price": st.column_config.NumberColumn("T2 Price (₹)", format="₹%.2f"),
+            "Target 3 Price": st.column_config.NumberColumn("T3 Price (₹)", format="₹%.2f"),
             "Initial SL Price": st.column_config.NumberColumn("Initial SL (₹)", format="₹%.2f"),
             "Final SL Price": st.column_config.NumberColumn("Final SL (₹)", format="₹%.2f"),
             "Peak High": st.column_config.NumberColumn("Peak High (₹)", format="₹%.2f"),
