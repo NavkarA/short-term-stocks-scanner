@@ -467,6 +467,9 @@ def render_backtest_dashboard():
     if not date_summary_df.empty:
         col_cfg = {
             "Signal Date": st.column_config.TextColumn("Signal Date", width="medium"),
+            "Nifty Open": st.column_config.NumberColumn("Nifty Open", format="₹%,.2f"),
+            "Nifty Close": st.column_config.NumberColumn("Nifty Close", format="₹%,.2f"),
+            "Nifty Chg %": st.column_config.NumberColumn("Nifty Chg %", format="%+.2f%%"),
             "Signals Count": st.column_config.NumberColumn("Stocks Count", format="%d"),
             "Target 1 Hits": st.column_config.NumberColumn("Target 1 Hits 🎯", format="%d"),
             "Target 2 Hits": st.column_config.NumberColumn("Target 2 Hits 🚀", format="%d"),
@@ -531,9 +534,6 @@ def render_backtest_dashboard():
         "Entry Date",
         "Symbol",
         "TradingView",
-        "Nifty Open",
-        "Nifty Close",
-        "Nifty Chg %",
         "Entry Price",
         "Target 1 Price",
         "Target 2 Price",
@@ -553,9 +553,6 @@ def render_backtest_dashboard():
         view_df[present_cols],
         column_config={
             "TradingView": st.column_config.LinkColumn("TradingView", display_text="📈 Chart"),
-            "Nifty Open": st.column_config.NumberColumn("Nifty Open", format="₹%,.2f"),
-            "Nifty Close": st.column_config.NumberColumn("Nifty Close", format="₹%,.2f"),
-            "Nifty Chg %": st.column_config.NumberColumn("Nifty Chg %", format="%+.2f%%"),
             "Entry Price": st.column_config.NumberColumn("Entry (₹)", format="₹%.2f"),
             "Target 1 Price": st.column_config.NumberColumn("T1 Price (₹)", format="₹%.2f"),
             "Target 2 Price": st.column_config.NumberColumn("T2 Price (₹)", format="₹%.2f"),

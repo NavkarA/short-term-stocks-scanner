@@ -712,8 +712,21 @@ def run_swing_backtest(
             c_wr = (c_win / c_tot) * 100.0 if c_tot > 0 else 0.0
             c_avg_ret = grp["Realized Return %"].mean()
 
+            # Nifty data for this Signal Date (or Entry Date fallback)
+            n_info = nifty_map.get(s_date, {})
+            if not n_info and not grp.empty:
+                e_date = str(grp["Entry Date"].iloc[0])
+                n_info = nifty_map.get(e_date, {})
+
+            n_open = n_info.get("open", 0.0)
+            n_close = n_info.get("close", 0.0)
+            n_chg = n_info.get("chg_pct", 0.0)
+
             date_summary_list.append({
                 "Signal Date": s_date,
+                "Nifty Open": n_open,
+                "Nifty Close": n_close,
+                "Nifty Chg %": n_chg,
                 "Signals Count": c_tot,
                 "Target 1 Hits": c_t1,
                 "Target 2 Hits": c_t2,
